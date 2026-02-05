@@ -1,0 +1,159 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"time"
+
+	"github.com/alecthomas/kong"
+	"github.com/user/plexcli/internal/auth"
+	"github.com/user/plexcli/internal/config"
+	"github.com/user/plexcli/internal/outfmt"
+	"github.com/user/plexcli/internal/plexclient"
+	"github.com/user/plexcli/internal/ui"
+)
+
+type RecentlyWatchedCmd struct {
+	Section string `help:"Filter by library section ID" default:""`
+	Type    string `help:"Filter by type: movie, tv, or all" default:"all" enum:"movie,tv,all"`
+	Limit   int    `help:"Maximum number of items to show" default:"50"`
+	Days    int    `help:"Filter items watched within the last N days (0 = no filter)" default:"0"`
+	Output  string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+}
+
+type RecentlyWatchedItem struct {
+	Title     string    `json:"title"`
+	Type      string    `json:"type"`
+	Library   string    `json:"library"`
+	WatchedAt time.Time `json:"watched_at"`
+}
+
+func (c *RecentlyWatchedCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("configuration error: %w", err)
+	}
+
+	authCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	token, err := auth.GetToken(authCtx, *cfg)
+	if err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+
+	timeout := time.Duration(cfg.Timeout) * time.Second
+	if cfg.Timeout == 0 {
+		timeout = plexclient.DefaultTimeout
+	}
+
+	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
+	if err != nil {
+		return fmt.Errorf("failed to create plex client: %w", err)
+	}
+
+	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	items, err := c.fetchHistory(fetchCtx, client)
+	if err != nil {
+		return err
+	}
+
+	processed := c.processHistory(fetchCtx, items, client)
+
+	if len(processed) == 0 {
+		fmt.Fprintln(u.Err(), "No recently watched items found")
+		return nil
+	}
+
+	if c.Limit > 0 && len(processed) > c.Limit {
+		processed = processed[:c.Limit]
+	}
+
+	return c.output(u.Out(), processed)
+}
+
+func (c *RecentlyWatchedCmd) fetchHistory(ctx context.Context, client *plexclient.Client) ([]plexclient.HistoryItem, error) {
+	history, err := client.GetHistory(ctx, c.Limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get history: %w", err)
+	}
+
+	return history, nil
+}
+
+func (c *RecentlyWatchedCmd) processHistory(ctx context.Context, history []plexclient.HistoryItem, client *plexclient.Client) []RecentlyWatchedItem {
+	var items []RecentlyWatchedItem
+	cutoffTime := time.Time{}
+
+	if c.Days > 0 {
+		cutoffTime = time.Now().AddDate(0, 0, -c.Days)
+	}
+
+	var sections []plexclient.Library
+	if len(history) > 0 {
+		sections, _ = client.GetSections(ctx)
+	}
+
+	for _, h := range history {
+		if c.Type != "all" && h.Type != c.Type {
+			continue
+		}
+
+		watchedAt := time.Unix(h.ViewedAt, 0)
+		if c.Days > 0 && watchedAt.Before(cutoffTime) {
+			continue
+		}
+
+		item := RecentlyWatchedItem{
+			Title:     h.Title,
+			Type:      h.Type,
+			WatchedAt: watchedAt,
+		}
+
+		libraryID := ""
+		if h.LibrarySectionID != nil {
+			libraryID = *h.LibrarySectionID
+		}
+
+		if libraryID != "" {
+			for _, section := range sections {
+				if section.ID == libraryID && section.Title != nil {
+					item.Library = *section.Title
+					break
+				}
+			}
+		}
+
+		if item.Library == "" {
+			item.Library = "unknown"
+		}
+
+		items = append(items, item)
+
+		if c.Limit > 0 && len(items) >= c.Limit {
+			break
+		}
+	}
+
+	return items
+}
+
+func (c *RecentlyWatchedCmd) output(w io.Writer, items []RecentlyWatchedItem) error {
+	formatter := outfmt.NewFormatter(outfmt.Format(c.Output))
+
+	header := []string{"TITLE", "TYPE", "LIBRARY", "WATCHED AT"}
+	rows := make([][]string, len(items))
+
+	for i, item := range items {
+		rows[i] = []string{
+			item.Title,
+			item.Type,
+			item.Library,
+			item.WatchedAt.Format("2006-01-02 15:04"),
+		}
+	}
+
+	return formatter.Format(w, header, rows, items)
+}

@@ -2,9 +2,12 @@ package plexclient
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/LukeHagar/plexgo"
@@ -14,7 +17,7 @@ import (
 )
 
 const (
-	DefaultTimeout    = 30 * time.Second
+	DefaultTimeout    = 120 * time.Second
 	DefaultMaxRetries = 3
 	DefaultPageSize   = 100
 )
@@ -172,38 +175,106 @@ func (c *Client) executeWithRetry(ctx context.Context, op string, fn func() erro
 
 func (c *Client) GetAllLibraryItems(ctx context.Context, sectionID string) ([]*components.Metadata, error) {
 	var allItems []*components.Metadata
-	offset := 0
-	pageSize := DefaultPageSize
 
-	for {
-		var items []*components.Metadata
-		var err error
+	err := c.executeWithRetry(ctx, "GetAllLibraryItems", func() error {
+		req := operations.GetLibraryItemsRequest{}
 
-		if sectionID == "" {
-			items, err = c.fetchLibraryItems(ctx, "", offset, pageSize)
-		} else {
-			items, err = c.fetchLibraryItems(ctx, sectionID, offset, pageSize)
-		}
-
+		resp, err := c.sdk.Library.GetLibraryItems(ctx, req)
 		if err != nil {
-			return nil, &PlexError{
-				Op:      "GetAllLibraryItems",
-				Section: sectionID,
-				Err:     err,
+			return fmt.Errorf("failed to get library items: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		if resp.MediaContainerWithMetadata == nil ||
+			resp.MediaContainerWithMetadata.MediaContainer == nil ||
+			resp.MediaContainerWithMetadata.MediaContainer.Metadata == nil {
+			return nil
+		}
+
+		container := resp.MediaContainerWithMetadata.MediaContainer
+		for i := range container.Metadata {
+			allItems = append(allItems, &container.Metadata[i])
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, &PlexError{
+			Op:  "GetAllLibraryItems",
+			Err: err,
+		}
+	}
+
+	return allItems, nil
+}
+
+func (c *Client) GetLibraryItemsConcurrent(ctx context.Context, sectionIDs []string, maxConcurrent int) ([]*components.Metadata, error) {
+	if maxConcurrent <= 0 {
+		maxConcurrent = 4
+	}
+
+	if len(sectionIDs) == 0 {
+		return []*components.Metadata{}, nil
+	}
+
+	semaphore := make(chan struct{}, maxConcurrent)
+
+	type sectionResult struct {
+		items []*components.Metadata
+		err   error
+		id    string
+	}
+	results := make(chan sectionResult, len(sectionIDs))
+
+	var wg sync.WaitGroup
+
+	for _, sectionID := range sectionIDs {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+
+			select {
+			case semaphore <- struct{}{}:
+				items, err := c.GetAllLibraryItems(ctx, id)
+				<-semaphore
+				results <- sectionResult{items: items, err: err, id: id}
+			case <-ctx.Done():
+				results <- sectionResult{err: ctx.Err(), id: id}
 			}
+		}(sectionID)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var allItems []*components.Metadata
+	var mu sync.Mutex
+	var firstErr error
+
+	for result := range results {
+		if result.err != nil {
+			if firstErr == nil {
+				firstErr = &PlexError{
+					Op:      "GetLibraryItemsConcurrent",
+					Section: result.id,
+					Err:     result.err,
+				}
+			}
+		} else {
+			mu.Lock()
+			allItems = append(allItems, result.items...)
+			mu.Unlock()
 		}
+	}
 
-		if len(items) == 0 {
-			break
-		}
-
-		allItems = append(allItems, items...)
-
-		if len(items) < pageSize {
-			break
-		}
-
-		offset += pageSize
+	if firstErr != nil {
+		return nil, firstErr
 	}
 
 	return allItems, nil
@@ -290,12 +361,21 @@ func (c *Client) GetItemMetadata(ctx context.Context, ratingKey string) (*compon
 	return metadata, nil
 }
 
-func (c *Client) GetHistory(ctx context.Context, limit int) ([]*components.Metadata, error) {
+type HistoryItem struct {
+	Title            string
+	Type             string
+	RatingKey        *string
+	LibrarySectionID *string
+	ViewedAt         int64
+	Thumb            *string
+}
+
+func (c *Client) GetHistory(ctx context.Context, limit int) ([]HistoryItem, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 
-	var historyItems []*components.Metadata
+	var historyItems []HistoryItem
 
 	err := c.executeWithRetry(ctx, "GetHistory", func() error {
 		req := operations.ListPlaybackHistoryRequest{}
@@ -316,19 +396,21 @@ func (c *Client) GetHistory(ctx context.Context, limit int) ([]*components.Metad
 		}
 
 		for _, hist := range resp.Object.MediaContainer.Metadata {
-			meta := &components.Metadata{}
+			item := HistoryItem{
+				RatingKey:        hist.RatingKey,
+				LibrarySectionID: hist.LibrarySectionID,
+				Thumb:            hist.Thumb,
+			}
 			if hist.Title != nil {
-				meta.Title = *hist.Title
+				item.Title = *hist.Title
 			}
 			if hist.Type != nil {
-				meta.Type = *hist.Type
+				item.Type = *hist.Type
 			}
-			meta.RatingKey = hist.RatingKey
-			if hist.Key != nil {
-				meta.Key = *hist.Key
+			if hist.ViewedAt != nil {
+				item.ViewedAt = *hist.ViewedAt
 			}
-			meta.Thumb = hist.Thumb
-			historyItems = append(historyItems, meta)
+			historyItems = append(historyItems, item)
 		}
 
 		return nil
@@ -344,47 +426,73 @@ func (c *Client) GetHistory(ctx context.Context, limit int) ([]*components.Metad
 	return historyItems, nil
 }
 
+// rawSection is a minimal struct to parse the Plex sections response
+type rawSection struct {
+	UUID  string `xml:"uuid,attr"`
+	Title string `xml:"title,attr"`
+	Type  string `xml:"type,attr"`
+	Key   string `xml:"key,attr"`
+}
+
+type rawSectionsResponse struct {
+	XMLName   xml.Name     `xml:"MediaContainer"`
+	Directory []rawSection `xml:"Directory"`
+}
+
 func (c *Client) GetSections(ctx context.Context) ([]Library, error) {
 	var libraries []Library
 
 	err := c.executeWithRetry(ctx, "GetSections", func() error {
-		resp, err := c.sdk.Library.GetSections(ctx)
+		// Make raw HTTP request to avoid SDK unmarshaling bug with 'hidden' field
+		url := fmt.Sprintf("%s/library/sections", c.serverURL)
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
-			return fmt.Errorf("failed to get library sections: %w", err)
+			return fmt.Errorf("failed to create request: %w", err)
 		}
+
+		req.Header.Set("X-Plex-Token", c.token)
+
+		httpClient := &http.Client{Timeout: c.timeout}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 		}
 
-		if resp.Object == nil ||
-			resp.Object.MediaContainer == nil ||
-			resp.Object.MediaContainer.Directory == nil {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		var rawResp rawSectionsResponse
+		if err := xml.Unmarshal(body, &rawResp); err != nil {
+			return fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+
+		if rawResp.Directory == nil {
 			return nil
 		}
 
-		for _, section := range resp.Object.MediaContainer.Directory {
+		for _, section := range rawResp.Directory {
+			title := section.Title
+			if title == "" {
+				title = "Unknown"
+			}
+			key := section.Key
+			if key == "" {
+				key = "/library/sections/" + section.UUID
+			}
+
 			lib := Library{
-				ID:    section.GetUUID(),
-				Title: section.GetTitle(),
-				Type:  string(section.GetType()),
-				Key:   section.GetKey(),
-				UUID:  section.GetUUID(),
-			}
-
-			if lib.Title == nil || *lib.Title == "" {
-				title := "Unknown"
-				lib.Title = &title
-			}
-			if lib.Key == nil || *lib.Key == "" {
-				key := "/library/sections/" + lib.ID
-				lib.Key = &key
-			}
-
-			for _, loc := range section.GetLocation() {
-				if path := loc.GetPath(); path != nil {
-					lib.Location = append(lib.Location, fmt.Sprintf("%v", path))
-				}
+				ID:    section.UUID,
+				Title: &title,
+				Type:  section.Type,
+				Key:   &key,
+				UUID:  section.UUID,
 			}
 
 			libraries = append(libraries, lib)

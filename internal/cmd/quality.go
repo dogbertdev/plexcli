@@ -1,0 +1,241 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"strings"
+	"time"
+
+	"github.com/LukeHagar/plexgo/models/components"
+	"github.com/alecthomas/kong"
+	"github.com/user/plexcli/internal/auth"
+	"github.com/user/plexcli/internal/config"
+	"github.com/user/plexcli/internal/outfmt"
+	"github.com/user/plexcli/internal/plexclient"
+	"github.com/user/plexcli/internal/ui"
+)
+
+// QualityCheckCmd represents the quality check command
+type QualityCheckCmd struct {
+	MinResolution string `help:"Minimum resolution filter (720p, 1080p, 4k)" default:"1080p" enum:"720p,1080p,4k"`
+	HDR           bool   `help:"Only show HDR content"`
+	Section       string `help:"Library section ID to scan (empty = all sections)" default:""`
+	Type          string `help:"Filter by type: movie, episode, or all" default:"all" enum:"movie,episode,all"`
+	Output        string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+}
+
+// QualityInfo represents quality information for an item
+type QualityInfo struct {
+	Title      string `json:"title"`
+	Year       int    `json:"year,omitempty"`
+	Type       string `json:"type"`
+	Resolution string `json:"resolution"`
+	HDR        bool   `json:"hdr"`
+	Bitrate    int    `json:"bitrate"`
+	VideoCodec string `json:"video_codec"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+}
+
+// Run executes the quality check command
+func (c *QualityCheckCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("configuration error: %w", err)
+	}
+
+	authCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	token, err := auth.GetToken(authCtx, *cfg)
+	if err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+
+	timeout := time.Duration(cfg.Timeout) * time.Second
+	if cfg.Timeout == 0 {
+		timeout = plexclient.DefaultTimeout
+	}
+
+	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
+	if err != nil {
+		return fmt.Errorf("failed to create plex client: %w", err)
+	}
+
+	minResValue := resolutionToValue(c.MinResolution)
+
+	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	items, err := c.fetchItems(fetchCtx, client)
+	if err != nil {
+		return err
+	}
+
+	results := c.checkQuality(items, minResValue)
+
+	if len(results) == 0 {
+		fmt.Fprintln(u.Err(), "No items found matching quality criteria")
+		return nil
+	}
+
+	return c.outputResults(u.Out(), results)
+}
+
+func (c *QualityCheckCmd) fetchItems(ctx context.Context, client *plexclient.Client) ([]*components.Metadata, error) {
+	if c.Section != "" {
+		return client.GetAllLibraryItems(ctx, c.Section)
+	}
+
+	sections, err := client.GetSections(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sections: %w", err)
+	}
+
+	var allItems []*components.Metadata
+	for _, section := range sections {
+		items, err := client.GetAllLibraryItems(ctx, section.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get items from section %s: %w", section.ID, err)
+		}
+		allItems = append(allItems, items...)
+	}
+
+	return allItems, nil
+}
+
+func (c *QualityCheckCmd) checkQuality(items []*components.Metadata, minResValue int) []QualityInfo {
+	var results []QualityInfo
+
+	for _, item := range items {
+		if c.Type != "all" && string(item.Type) != c.Type {
+			continue
+		}
+
+		info := c.extractQualityInfo(item)
+		if info.meetsCriteria(minResValue, c.HDR) {
+			results = append(results, info)
+		}
+	}
+
+	return results
+}
+
+func (c *QualityCheckCmd) extractQualityInfo(item *components.Metadata) QualityInfo {
+	info := QualityInfo{
+		Title: qualityGetTitle(item),
+		Type:  string(item.Type),
+	}
+
+	if item.Year != nil {
+		info.Year = *item.Year
+	}
+
+	if item.Media != nil && len(item.Media) > 0 {
+		media := item.Media[0]
+
+		if media.VideoResolution != nil {
+			info.Resolution = *media.VideoResolution
+		}
+
+		if media.Bitrate != nil {
+			info.Bitrate = int(*media.Bitrate)
+		}
+
+		if media.Width != nil {
+			info.Width = int(*media.Width)
+		}
+
+		if media.Height != nil {
+			info.Height = int(*media.Height)
+		}
+
+		if media.Part != nil && len(media.Part) > 0 {
+			part := media.Part[0]
+			if part.Stream != nil {
+				for _, stream := range part.Stream {
+					if stream.StreamType == 1 {
+						if stream.Codec != "" {
+							info.VideoCodec = stream.Codec
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return info
+}
+
+func (q QualityInfo) meetsCriteria(minResValue int, requireHDR bool) bool {
+	resValue := resolutionToValue(q.Resolution)
+
+	if resValue < minResValue {
+		return false
+	}
+
+	if requireHDR && !q.HDR {
+		return false
+	}
+
+	return true
+}
+
+func (c *QualityCheckCmd) outputResults(w io.Writer, results []QualityInfo) error {
+	formatter := outfmt.NewFormatter(outfmt.Format(c.Output))
+
+	header := []string{"TITLE", "YEAR", "TYPE", "RESOLUTION", "HDR", "BITRATE", "CODEC"}
+	rows := make([][]string, len(results))
+
+	for i, r := range results {
+		yearStr := ""
+		if r.Year > 0 {
+			yearStr = fmt.Sprintf("%d", r.Year)
+		}
+
+		hdrStr := "No"
+		if r.HDR {
+			hdrStr = "Yes"
+		}
+
+		bitrateStr := ""
+		if r.Bitrate > 0 {
+			bitrateStr = fmt.Sprintf("%d kbps", r.Bitrate)
+		}
+
+		rows[i] = []string{
+			r.Title,
+			yearStr,
+			r.Type,
+			r.Resolution,
+			hdrStr,
+			bitrateStr,
+			r.VideoCodec,
+		}
+	}
+
+	return formatter.Format(w, header, rows, results)
+}
+
+func resolutionToValue(res string) int {
+	res = strings.ToLower(res)
+	switch {
+	case strings.Contains(res, "4k") || strings.Contains(res, "2160"):
+		return 2160
+	case strings.Contains(res, "1080"):
+		return 1080
+	case strings.Contains(res, "720"):
+		return 720
+	case strings.Contains(res, "480"):
+		return 480
+	default:
+		return 0
+	}
+}
+
+func qualityGetTitle(item *components.Metadata) string {
+	if item.Title != "" {
+		return item.Title
+	}
+	return "Unknown"
+}
