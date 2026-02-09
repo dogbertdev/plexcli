@@ -2,6 +2,7 @@ package plexclient
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -185,30 +186,85 @@ func (c *Client) executeWithRetry(ctx context.Context, op string, fn func() erro
 	return lastErr
 }
 
+type rawMediaMetadata struct {
+	RatingKey        string  `json:"ratingKey"`
+	Key              string  `json:"key"`
+	Title            string  `json:"title"`
+	Type             string  `json:"type"`
+	Year             *int    `json:"year"`
+	AddedAt          int64   `json:"addedAt"`
+	ViewCount        *int    `json:"viewCount"`
+	GrandparentTitle *string `json:"grandparentTitle"`
+	Media            []struct {
+		Part []struct {
+			File   *string `json:"file"`
+			Size   *int64  `json:"size"`
+			Stream []struct {
+				StreamType   int     `json:"streamType"`
+				Language     *string `json:"language"`
+				LanguageCode *string `json:"languageCode"`
+				Codec        *string `json:"codec"`
+				Channels     *int    `json:"channels"`
+			} `json:"Stream"`
+		} `json:"Part"`
+		VideoResolution *string `json:"videoResolution"`
+		VideoCodec      *string `json:"videoCodec"`
+		AudioCodec      *string `json:"audioCodec"`
+		AudioChannels   *int    `json:"audioChannels"`
+	} `json:"Media"`
+	Summary *string `json:"summary"`
+	Thumb   *string `json:"thumb"`
+}
+
+type rawLibraryItemsResponse struct {
+	MediaContainer struct {
+		Metadata []rawMediaMetadata `json:"Metadata"`
+	} `json:"MediaContainer"`
+}
+
 func (c *Client) GetAllLibraryItems(ctx context.Context, sectionID string) ([]*components.Metadata, error) {
+	if sectionID == "" {
+		return nil, &PlexError{
+			Op:  "GetAllLibraryItems",
+			Err: fmt.Errorf("section ID is required"),
+		}
+	}
+
 	var allItems []*components.Metadata
 
 	err := c.executeWithRetry(ctx, "GetAllLibraryItems", func() error {
-		req := operations.GetLibraryItemsRequest{}
-
-		resp, err := c.sdk.Library.GetLibraryItems(ctx, req)
+		url := fmt.Sprintf("%s/library/sections/%s/all?X-Plex-Container-Start=0&X-Plex-Container-Size=1000&X-Plex-Token=%s", c.serverURL, sectionID, c.token)
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
-			return fmt.Errorf("failed to get library items: %w", err)
+			return fmt.Errorf("failed to create request: %w", err)
 		}
+
+		req.Header.Set("Accept", "application/json")
+
+		httpClient := &http.Client{Timeout: c.timeout}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 		}
 
-		if resp.MediaContainerWithMetadata == nil ||
-			resp.MediaContainerWithMetadata.MediaContainer == nil ||
-			resp.MediaContainerWithMetadata.MediaContainer.Metadata == nil {
-			return nil
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
 		}
 
-		container := resp.MediaContainerWithMetadata.MediaContainer
-		for i := range container.Metadata {
-			allItems = append(allItems, &container.Metadata[i])
+		var rawResp rawLibraryItemsResponse
+		if err := json.Unmarshal(body, &rawResp); err != nil {
+			return fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+
+		for _, item := range rawResp.MediaContainer.Metadata {
+			meta := convertRawToMetadata(item)
+			allItems = append(allItems, meta)
 		}
 
 		return nil
@@ -216,12 +272,73 @@ func (c *Client) GetAllLibraryItems(ctx context.Context, sectionID string) ([]*c
 
 	if err != nil {
 		return nil, &PlexError{
-			Op:  "GetAllLibraryItems",
-			Err: err,
+			Op:      "GetAllLibraryItems",
+			Section: sectionID,
+			Err:     err,
 		}
 	}
 
 	return allItems, nil
+}
+
+func convertRawToMetadata(raw rawMediaMetadata) *components.Metadata {
+	ratingKey := raw.RatingKey
+	key := raw.Key
+
+	meta := &components.Metadata{
+		RatingKey:        &ratingKey,
+		Key:              key,
+		Title:            raw.Title,
+		Type:             raw.Type,
+		AddedAt:          raw.AddedAt,
+		Year:             raw.Year,
+		ViewCount:        raw.ViewCount,
+		Summary:          raw.Summary,
+		Thumb:            raw.Thumb,
+		GrandparentTitle: raw.GrandparentTitle,
+	}
+
+	if len(raw.Media) > 0 {
+		media := make([]components.Media, len(raw.Media))
+		for i, m := range raw.Media {
+			media[i] = components.Media{
+				VideoResolution: m.VideoResolution,
+				VideoCodec:      m.VideoCodec,
+				AudioCodec:      m.AudioCodec,
+				AudioChannels:   m.AudioChannels,
+			}
+			if len(m.Part) > 0 {
+				parts := make([]components.Part, len(m.Part))
+				for j, p := range m.Part {
+					parts[j] = components.Part{
+						File: p.File,
+						Size: p.Size,
+					}
+					if len(p.Stream) > 0 {
+						streams := make([]components.Stream, len(p.Stream))
+						for k, s := range p.Stream {
+							codec := ""
+							if s.Codec != nil {
+								codec = *s.Codec
+							}
+							streams[k] = components.Stream{
+								StreamType:   components.StreamType(s.StreamType),
+								Language:     s.Language,
+								LanguageCode: s.LanguageCode,
+								Codec:        codec,
+								Channels:     s.Channels,
+							}
+						}
+						parts[j].Stream = streams
+					}
+				}
+				media[i].Part = parts
+			}
+		}
+		meta.Media = media
+	}
+
+	return meta
 }
 
 func (c *Client) GetLibraryItemsConcurrent(ctx context.Context, sectionIDs []string, maxConcurrent int) ([]*components.Metadata, error) {
@@ -292,41 +409,6 @@ func (c *Client) GetLibraryItemsConcurrent(ctx context.Context, sectionIDs []str
 	return allItems, nil
 }
 
-func (c *Client) fetchLibraryItems(ctx context.Context, sectionID string, offset, limit int) ([]*components.Metadata, error) {
-	var items []*components.Metadata
-
-	err := c.executeWithRetry(ctx, "fetchLibraryItems", func() error {
-		req := operations.GetLibraryItemsRequest{}
-
-		resp, err := c.sdk.Library.GetLibraryItems(ctx, req)
-		if err != nil {
-			return fmt.Errorf("failed to get library items: %w", err)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-		}
-
-		if resp.MediaContainerWithMetadata == nil ||
-			resp.MediaContainerWithMetadata.MediaContainer == nil {
-			return nil
-		}
-
-		container := resp.MediaContainerWithMetadata.MediaContainer
-		if container.Metadata == nil {
-			return nil
-		}
-
-		for i := range container.Metadata {
-			items = append(items, &container.Metadata[i])
-		}
-
-		return nil
-	})
-
-	return items, err
-}
-
 func (c *Client) GetItemMetadata(ctx context.Context, ratingKey string) (*components.Metadata, error) {
 	if ratingKey == "" {
 		return nil, &PlexError{
@@ -375,11 +457,30 @@ func (c *Client) GetItemMetadata(ctx context.Context, ratingKey string) (*compon
 
 type HistoryItem struct {
 	Title            string
+	GrandparentTitle string
 	Type             string
 	RatingKey        *string
 	LibrarySectionID *string
 	ViewedAt         int64
 	Thumb            *string
+}
+
+type rawHistoryMetadata struct {
+	Title            string  `json:"title"`
+	GrandparentTitle string  `json:"grandparentTitle"`
+	Type             string  `json:"type"`
+	RatingKey        *string `json:"ratingKey"`
+	LibrarySectionID *string `json:"librarySectionID"`
+	ViewedAt         *int64  `json:"viewedAt"`
+	Thumb            *string `json:"thumb"`
+}
+
+type rawHistoryContainer struct {
+	Metadata []rawHistoryMetadata `json:"Metadata"`
+}
+
+type rawHistoryResponse struct {
+	MediaContainer rawHistoryContainer `json:"MediaContainer"`
 }
 
 func (c *Client) GetHistory(ctx context.Context, limit int) ([]HistoryItem, error) {
@@ -390,39 +491,53 @@ func (c *Client) GetHistory(ctx context.Context, limit int) ([]HistoryItem, erro
 	var historyItems []HistoryItem
 
 	err := c.executeWithRetry(ctx, "GetHistory", func() error {
-		req := operations.ListPlaybackHistoryRequest{}
-
-		resp, err := c.sdk.Status.ListPlaybackHistory(ctx, req)
+		url := fmt.Sprintf("%s/status/sessions/history/all", c.serverURL)
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
-			return fmt.Errorf("failed to get playback history: %w", err)
+			return fmt.Errorf("failed to create request: %w", err)
 		}
+
+		req.Header.Set("X-Plex-Token", c.token)
+		req.Header.Set("Accept", "application/json")
+
+		httpClient := &http.Client{Timeout: c.timeout}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 		}
 
-		if resp.Object == nil ||
-			resp.Object.MediaContainer == nil ||
-			resp.Object.MediaContainer.Metadata == nil {
-			return nil
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
 		}
 
-		for _, hist := range resp.Object.MediaContainer.Metadata {
+		var rawResp rawHistoryResponse
+		if err := json.Unmarshal(body, &rawResp); err != nil {
+			return fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+
+		for _, hist := range rawResp.MediaContainer.Metadata {
 			item := HistoryItem{
+				Title:            hist.Title,
+				GrandparentTitle: hist.GrandparentTitle,
+				Type:             hist.Type,
 				RatingKey:        hist.RatingKey,
 				LibrarySectionID: hist.LibrarySectionID,
 				Thumb:            hist.Thumb,
-			}
-			if hist.Title != nil {
-				item.Title = *hist.Title
-			}
-			if hist.Type != nil {
-				item.Type = *hist.Type
 			}
 			if hist.ViewedAt != nil {
 				item.ViewedAt = *hist.ViewedAt
 			}
 			historyItems = append(historyItems, item)
+
+			if len(historyItems) >= limit {
+				break
+			}
 		}
 
 		return nil
@@ -500,7 +615,7 @@ func (c *Client) GetSections(ctx context.Context) ([]Library, error) {
 			}
 
 			lib := Library{
-				ID:    section.UUID,
+				ID:    section.Key,
 				Title: &title,
 				Type:  section.Type,
 				Key:   &key,

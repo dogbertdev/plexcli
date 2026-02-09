@@ -21,6 +21,7 @@ type QualityCheckCmd struct {
 	HDR           bool   `help:"Only show HDR content"`
 	Section       string `help:"Library section ID to scan (empty = all sections)" default:""`
 	Type          string `help:"Filter by type: movie, episode, or all" default:"all" enum:"movie,episode,all"`
+	Limit         int    `help:"Maximum number of items to display" default:"0"`
 	Output        string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
@@ -74,6 +75,10 @@ func (c *QualityCheckCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) e
 	if len(results) == 0 {
 		fmt.Fprintln(u.Err(), "No items found matching quality criteria")
 		return nil
+	}
+
+	if c.Limit > 0 && len(results) > c.Limit {
+		results = results[:c.Limit]
 	}
 
 	return c.outputResults(u.Out(), results)

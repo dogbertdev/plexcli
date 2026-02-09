@@ -107,7 +107,7 @@ func (c *RecentlyWatchedCmd) processHistory(ctx context.Context, history []plexc
 		}
 
 		item := RecentlyWatchedItem{
-			Title:     h.Title,
+			Title:     c.formatTitle(h),
 			Type:      h.Type,
 			WatchedAt: watchedAt,
 		}
@@ -138,6 +138,16 @@ func (c *RecentlyWatchedCmd) processHistory(ctx context.Context, history []plexc
 	}
 
 	return items
+}
+
+func (c *RecentlyWatchedCmd) formatTitle(h plexclient.HistoryItem) string {
+	if h.GrandparentTitle != "" && h.Title != "" {
+		return h.GrandparentTitle + " - " + h.Title
+	}
+	if h.Title != "" {
+		return h.Title
+	}
+	return plexclient.DefaultUnknownTitle
 }
 
 func (c *RecentlyWatchedCmd) output(w io.Writer, items []RecentlyWatchedItem) error {

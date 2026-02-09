@@ -20,6 +20,7 @@ type SubtitlesMissingCmd struct {
 	Lang    string `help:"Comma-separated list of language codes to check (e.g., en,de,fr)" required:"true"`
 	Section string `help:"Library section ID to scan (empty = all sections)" default:""`
 	Type    string `help:"Filter by type: movie, episode, or all" default:"all" enum:"movie,episode,all"`
+	Limit   int    `help:"Maximum number of items to display" default:"0"`
 	Output  string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
@@ -72,6 +73,10 @@ func (c *SubtitlesMissingCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Confi
 	if len(results) == 0 {
 		fmt.Fprintln(u.Err(), "No items with missing subtitles found")
 		return nil
+	}
+
+	if c.Limit > 0 && len(results) > c.Limit {
+		results = results[:c.Limit]
 	}
 
 	return c.outputResults(u.Out(), results)

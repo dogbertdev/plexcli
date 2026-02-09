@@ -19,6 +19,7 @@ import (
 type FilePathsCmd struct {
 	Title   string `name:"title" help:"Filter by title (substring match)"`
 	Section string `name:"section" help:"Filter by library section ID"`
+	Limit   int    `help:"Maximum number of items to display" default:"0"`
 	Output  string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
@@ -69,6 +70,10 @@ func (c *FilePathsCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) erro
 	if len(filePaths) == 0 {
 		fmt.Fprintln(u.Err(), "No file paths found")
 		return nil
+	}
+
+	if c.Limit > 0 && len(filePaths) > c.Limit {
+		filePaths = filePaths[:c.Limit]
 	}
 
 	return c.outputResults(u.Out(), filePaths)

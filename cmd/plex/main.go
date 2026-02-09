@@ -99,11 +99,32 @@ func main() {
 	ctx := outfmt.WithMode(context.Background(), format)
 	kctx.BindTo(ctx, (*context.Context)(nil))
 
+	if cli.JSON || cli.Plain {
+		outputStr := "json"
+		if cli.Plain {
+			outputStr = "tsv"
+		}
+		applyOutputFormat(&cli, outputStr)
+	}
+
 	err = kctx.Run()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func applyOutputFormat(cli *CLI, format string) {
+	cli.Unwatched.Output = format
+	cli.Recently.Output = format
+	cli.Added.Output = format
+	cli.Duplicates.Output = format
+	cli.FilePaths.Output = format
+	cli.Subtitles.Output = format
+	cli.Audio.Output = format
+	cli.Episodes.Output = format
+	cli.Quality.Output = format
+	cli.Metadata.Output = format
 }
 
 // loadConfig loads configuration from file and/or environment/cli flags
