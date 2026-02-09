@@ -491,13 +491,12 @@ func (c *Client) GetHistory(ctx context.Context, limit int) ([]HistoryItem, erro
 	var historyItems []HistoryItem
 
 	err := c.executeWithRetry(ctx, "GetHistory", func() error {
-		url := fmt.Sprintf("%s/status/sessions/history/all", c.serverURL)
+		url := fmt.Sprintf("%s/status/sessions/history/all?sort=viewedAt:desc&X-Plex-Token=%s", c.serverURL, c.token)
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return fmt.Errorf("failed to create request: %w", err)
 		}
 
-		req.Header.Set("X-Plex-Token", c.token)
 		req.Header.Set("Accept", "application/json")
 
 		httpClient := &http.Client{Timeout: c.timeout}
