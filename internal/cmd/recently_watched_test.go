@@ -36,8 +36,8 @@ func TestRecentlyWatchedCmd_processHistory(t *testing.T) {
 		{
 			name:          "filter by type tv",
 			cmd:           RecentlyWatchedCmd{Type: "tv", Limit: 50},
-			expectedCount: 0,
-			expectedTypes: map[string]bool{},
+			expectedCount: 2,
+			expectedTypes: map[string]bool{"episode": true, "show": true, "season": true},
 		},
 		{
 			name:          "all types",

@@ -97,7 +97,7 @@ func (c *RecentlyWatchedCmd) processHistory(ctx context.Context, history []plexc
 	}
 
 	for _, h := range history {
-		if c.Type != "all" && h.Type != c.Type {
+		if !c.matchesType(h.Type) {
 			continue
 		}
 
@@ -148,6 +148,16 @@ func (c *RecentlyWatchedCmd) formatTitle(h plexclient.HistoryItem) string {
 		return h.Title
 	}
 	return plexclient.DefaultUnknownTitle
+}
+
+func (c *RecentlyWatchedCmd) matchesType(itemType string) bool {
+	if c.Type == "all" {
+		return true
+	}
+	if c.Type == "tv" {
+		return itemType == "episode" || itemType == "show" || itemType == "season"
+	}
+	return itemType == c.Type
 }
 
 func (c *RecentlyWatchedCmd) output(w io.Writer, items []RecentlyWatchedItem) error {
