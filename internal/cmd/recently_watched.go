@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -131,10 +132,14 @@ func (c *RecentlyWatchedCmd) processHistory(ctx context.Context, history []plexc
 		}
 
 		items = append(items, item)
+	}
 
-		if c.Limit > 0 && len(items) >= c.Limit {
-			break
-		}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].WatchedAt.After(items[j].WatchedAt)
+	})
+
+	if c.Limit > 0 && len(items) > c.Limit {
+		items = items[:c.Limit]
 	}
 
 	return items
