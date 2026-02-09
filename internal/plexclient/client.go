@@ -13,7 +13,6 @@ import (
 
 	"github.com/LukeHagar/plexgo"
 	"github.com/LukeHagar/plexgo/models/components"
-	"github.com/LukeHagar/plexgo/models/operations"
 	"github.com/LukeHagar/plexgo/retry"
 )
 
@@ -281,6 +280,57 @@ func (c *Client) GetAllLibraryItems(ctx context.Context, sectionID string) ([]*c
 	return allItems, nil
 }
 
+// GetItemMetadata fetches detailed metadata for a single item including streams
+func (c *Client) GetItemMetadata(ctx context.Context, ratingKey string) (*components.Metadata, error) {
+	var result *components.Metadata
+
+	err := c.executeWithRetry(ctx, "GetItemMetadata", func() error {
+		url := fmt.Sprintf("%s/library/metadata/%s?X-Plex-Token=%s", c.serverURL, ratingKey, c.token)
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Accept", "application/json")
+
+		httpClient := &http.Client{Timeout: c.timeout}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		var rawResp rawLibraryItemsResponse
+		if err := json.Unmarshal(body, &rawResp); err != nil {
+			return fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+
+		if len(rawResp.MediaContainer.Metadata) > 0 {
+			result = convertRawToMetadata(rawResp.MediaContainer.Metadata[0])
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, &PlexError{
+			Op:  "GetItemMetadata",
+			Err: err,
+		}
+	}
+
+	return result, nil
+}
+
 func convertRawToMetadata(raw rawMediaMetadata) *components.Metadata {
 	ratingKey := raw.RatingKey
 	key := raw.Key
@@ -407,52 +457,6 @@ func (c *Client) GetLibraryItemsConcurrent(ctx context.Context, sectionIDs []str
 	}
 
 	return allItems, nil
-}
-
-func (c *Client) GetItemMetadata(ctx context.Context, ratingKey string) (*components.Metadata, error) {
-	if ratingKey == "" {
-		return nil, &PlexError{
-			Op:  "GetItemMetadata",
-			Err: fmt.Errorf("rating key is required"),
-		}
-	}
-
-	var metadata *components.Metadata
-
-	err := c.executeWithRetry(ctx, "GetItemMetadata", func() error {
-		req := operations.GetMetadataItemRequest{
-			Ids: []string{ratingKey},
-		}
-
-		resp, err := c.sdk.Content.GetMetadataItem(ctx, req)
-		if err != nil {
-			return fmt.Errorf("failed to get metadata: %w", err)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-		}
-
-		if resp.MediaContainerWithMetadata == nil ||
-			resp.MediaContainerWithMetadata.MediaContainer == nil ||
-			len(resp.MediaContainerWithMetadata.MediaContainer.Metadata) == 0 {
-			return fmt.Errorf("no metadata found for rating key: %s", ratingKey)
-		}
-
-		meta := resp.MediaContainerWithMetadata.MediaContainer.Metadata[0]
-		metadata = &meta
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, &PlexError{
-			Op:  "GetItemMetadata",
-			Err: err,
-		}
-	}
-
-	return metadata, nil
 }
 
 type HistoryItem struct {

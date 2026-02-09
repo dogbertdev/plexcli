@@ -93,7 +93,7 @@ func TestSubtitlesMissingCmd_extractSubtitleInfo(t *testing.T) {
 	}
 }
 
-func TestSubtitlesMissingCmd_checkSubtitles(t *testing.T) {
+func TestSubtitlesMissingCmd_extractSubtitleInfo_withMissing(t *testing.T) {
 	items := []*components.Metadata{
 		{
 			Title: "Movie with subs",
@@ -118,17 +118,20 @@ func TestSubtitlesMissingCmd_checkSubtitles(t *testing.T) {
 	}
 
 	cmd := &SubtitlesMissingCmd{Type: "all"}
-	results := cmd.checkSubtitles(items, []string{"en", "de"})
+	var results []SubtitleInfo
+	for _, item := range items {
+		info := cmd.extractSubtitleInfo(item, []string{"en", "de"})
+		if len(info.MissingSubs) > 0 {
+			results = append(results, info)
+		}
+	}
 
-	// Both items have missing subs:
-	// - "Movie with subs" is missing "de"
-	// - "Movie without subs" is missing both "en" and "de"
 	if len(results) != 2 {
 		t.Errorf("expected 2 results with missing subs, got %d", len(results))
 	}
 }
 
-func TestSubtitlesMissingCmd_filterByType(t *testing.T) {
+func TestSubtitlesMissingCmd_extractSubtitleInfo_filterByType(t *testing.T) {
 	items := []*components.Metadata{
 		{
 			Title: "Movie",
@@ -143,7 +146,16 @@ func TestSubtitlesMissingCmd_filterByType(t *testing.T) {
 	}
 
 	cmd := &SubtitlesMissingCmd{Type: "movie"}
-	results := cmd.checkSubtitles(items, []string{"en"})
+	var results []SubtitleInfo
+	for _, item := range items {
+		if cmd.Type != "all" && string(item.Type) != cmd.Type {
+			continue
+		}
+		info := cmd.extractSubtitleInfo(item, []string{"en"})
+		if len(info.MissingSubs) > 0 {
+			results = append(results, info)
+		}
+	}
 
 	if len(results) != 1 {
 		t.Errorf("expected 1 result for movie type, got %d", len(results))

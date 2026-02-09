@@ -68,7 +68,7 @@ func (c *SubtitlesMissingCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Confi
 		return err
 	}
 
-	results := c.checkSubtitles(items, requestedLangs)
+	results := c.checkSubtitles(fetchCtx, items, client, requestedLangs)
 
 	if len(results) == 0 {
 		fmt.Fprintln(u.Err(), "No items with missing subtitles found")
@@ -104,7 +104,7 @@ func (c *SubtitlesMissingCmd) fetchItems(ctx context.Context, client *plexclient
 	return allItems, nil
 }
 
-func (c *SubtitlesMissingCmd) checkSubtitles(items []*components.Metadata, requestedLangs []string) []SubtitleInfo {
+func (c *SubtitlesMissingCmd) checkSubtitles(ctx context.Context, items []*components.Metadata, client *plexclient.Client, requestedLangs []string) []SubtitleInfo {
 	var results []SubtitleInfo
 
 	for _, item := range items {
@@ -112,9 +112,26 @@ func (c *SubtitlesMissingCmd) checkSubtitles(items []*components.Metadata, reque
 			continue
 		}
 
-		info := c.extractSubtitleInfo(item, requestedLangs)
+		ratingKey := ""
+		if item.RatingKey != nil {
+			ratingKey = *item.RatingKey
+		}
+		if ratingKey == "" {
+			continue
+		}
+
+		detailedItem, err := client.GetItemMetadata(ctx, ratingKey)
+		if err != nil || detailedItem == nil {
+			continue
+		}
+
+		info := c.extractSubtitleInfo(detailedItem, requestedLangs)
 		if len(info.MissingSubs) > 0 {
 			results = append(results, info)
+		}
+
+		if c.Limit > 0 && len(results) >= c.Limit {
+			break
 		}
 	}
 
@@ -162,7 +179,8 @@ func (c *SubtitlesMissingCmd) extractSubtitleInfo(item *components.Metadata, req
 	}
 
 	for _, lang := range requestedLangs {
-		if !availableLangs[lang] {
+		normalizedLang := normalizeLangCode(lang)
+		if !availableLangs[lang] && !availableLangs[normalizedLang] {
 			info.MissingSubs = append(info.MissingSubs, lang)
 		}
 	}
@@ -203,6 +221,23 @@ func parseLangList(langStr string) []string {
 		}
 	}
 	return result
+}
+
+var langCodeMap = map[string]string{
+	"en": "eng", "de": "deu", "fr": "fra", "es": "spa", "it": "ita",
+	"pt": "por", "ru": "rus", "ja": "jpn", "ko": "kor", "zh": "zho",
+	"pl": "pol", "nl": "nld", "sv": "swe", "da": "dan", "no": "nor",
+	"fi": "fin", "cs": "ces", "sk": "slk", "hu": "hun", "ro": "ron",
+	"bg": "bul", "hr": "hrv", "sl": "slv", "uk": "ukr", "el": "ell",
+	"tr": "tur", "ar": "ara", "he": "heb", "th": "tha", "vi": "vie",
+}
+
+func normalizeLangCode(code string) string {
+	code = strings.ToLower(code)
+	if mapped, ok := langCodeMap[code]; ok {
+		return mapped
+	}
+	return code
 }
 
 func getTitle(item *components.Metadata) string {
