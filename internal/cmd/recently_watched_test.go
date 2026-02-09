@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"testing"
 	"time"
 
@@ -60,7 +61,8 @@ func TestRecentlyWatchedCmd_processHistory(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			items := tt.cmd.processHistory(history, nil)
+			ctx := context.Background()
+			items := tt.cmd.processHistory(ctx, history, nil)
 
 			if len(items) != tt.expectedCount {
 				t.Errorf("expected %d items, got %d", tt.expectedCount, len(items))
@@ -77,14 +79,14 @@ func TestRecentlyWatchedCmd_processHistory(t *testing.T) {
 	}
 }
 
-func TestRecentlyWatchedCmd_outputResults(t *testing.T) {
+func TestRecentlyWatchedCmd_output(t *testing.T) {
 	cmd := &RecentlyWatchedCmd{Output: "table"}
 	items := []RecentlyWatchedItem{
 		{Title: "Test Movie", Type: "movie", Library: "Movies", WatchedAt: time.Now()},
 	}
 
 	var buf bytes.Buffer
-	err := cmd.outputResults(&buf, items)
+	err := cmd.output(&buf, items)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -94,14 +96,14 @@ func TestRecentlyWatchedCmd_outputResults(t *testing.T) {
 	}
 }
 
-func TestRecentlyWatchedCmd_outputResultsJSON(t *testing.T) {
+func TestRecentlyWatchedCmd_outputJSON(t *testing.T) {
 	cmd := &RecentlyWatchedCmd{Output: "json"}
 	items := []RecentlyWatchedItem{
 		{Title: "Test Movie", Type: "movie", Library: "Movies", WatchedAt: time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)},
 	}
 
 	var buf bytes.Buffer
-	err := cmd.outputResults(&buf, items)
+	err := cmd.output(&buf, items)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -116,14 +118,14 @@ func TestRecentlyWatchedCmd_outputResultsJSON(t *testing.T) {
 	}
 }
 
-func TestRecentlyWatchedCmd_outputResultsTSV(t *testing.T) {
+func TestRecentlyWatchedCmd_outputTSV(t *testing.T) {
 	cmd := &RecentlyWatchedCmd{Output: "tsv"}
 	items := []RecentlyWatchedItem{
 		{Title: "Test Movie", Type: "movie", Library: "Movies", WatchedAt: time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)},
 	}
 
 	var buf bytes.Buffer
-	err := cmd.outputResults(&buf, items)
+	err := cmd.output(&buf, items)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}

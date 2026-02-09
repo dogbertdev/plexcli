@@ -17,7 +17,6 @@ import (
 	"github.com/user/plexcli/internal/ui"
 )
 
-// AudioCheckCmd represents the audio check command
 type AudioCheckCmd struct {
 	Codecs      string `help:"Comma-separated list of audio codecs to check (e.g., aac,ac3,dts)" default:""`
 	MinChannels int    `help:"Minimum number of audio channels" default:"2"`
@@ -26,7 +25,6 @@ type AudioCheckCmd struct {
 	Output      string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
-// AudioInfo represents audio information for an item
 type AudioInfo struct {
 	Title    string `json:"title"`
 	Year     int    `json:"year,omitempty"`
@@ -36,13 +34,12 @@ type AudioInfo struct {
 	Status   string `json:"status"`
 }
 
-// Run executes the audio check command
 func (c *AudioCheckCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("configuration error: %w", err)
 	}
 
-	authCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
 	defer cancel()
 
 	token, err := auth.GetToken(authCtx, *cfg)
@@ -222,5 +219,5 @@ func audioGetTitle(item *components.Metadata) string {
 	if item.Title != "" {
 		return item.Title
 	}
-	return "Unknown"
+	return plexclient.DefaultUnknownTitle
 }

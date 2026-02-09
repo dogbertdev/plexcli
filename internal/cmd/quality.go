@@ -16,7 +16,6 @@ import (
 	"github.com/user/plexcli/internal/ui"
 )
 
-// QualityCheckCmd represents the quality check command
 type QualityCheckCmd struct {
 	MinResolution string `help:"Minimum resolution filter (720p, 1080p, 4k)" default:"1080p" enum:"720p,1080p,4k"`
 	HDR           bool   `help:"Only show HDR content"`
@@ -25,7 +24,6 @@ type QualityCheckCmd struct {
 	Output        string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
-// QualityInfo represents quality information for an item
 type QualityInfo struct {
 	Title      string `json:"title"`
 	Year       int    `json:"year,omitempty"`
@@ -38,13 +36,12 @@ type QualityInfo struct {
 	Height     int    `json:"height"`
 }
 
-// Run executes the quality check command
 func (c *QualityCheckCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("configuration error: %w", err)
 	}
 
-	authCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
 	defer cancel()
 
 	token, err := auth.GetToken(authCtx, *cfg)
@@ -237,5 +234,5 @@ func qualityGetTitle(item *components.Metadata) string {
 	if item.Title != "" {
 		return item.Title
 	}
-	return "Unknown"
+	return plexclient.DefaultUnknownTitle
 }

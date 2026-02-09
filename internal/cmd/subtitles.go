@@ -16,7 +16,6 @@ import (
 	"github.com/user/plexcli/internal/ui"
 )
 
-// SubtitlesMissingCmd represents the subtitles missing command
 type SubtitlesMissingCmd struct {
 	Lang    string `help:"Comma-separated list of language codes to check (e.g., en,de,fr)" required:"true"`
 	Section string `help:"Library section ID to scan (empty = all sections)" default:""`
@@ -24,7 +23,6 @@ type SubtitlesMissingCmd struct {
 	Output  string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
-// SubtitleInfo represents subtitle information for an item
 type SubtitleInfo struct {
 	Title         string   `json:"title"`
 	Year          int      `json:"year,omitempty"`
@@ -33,13 +31,12 @@ type SubtitleInfo struct {
 	MissingSubs   []string `json:"missing_subs"`
 }
 
-// Run executes the subtitles missing command
 func (c *SubtitlesMissingCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("configuration error: %w", err)
 	}
 
-	authCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
 	defer cancel()
 
 	token, err := auth.GetToken(authCtx, *cfg)
@@ -207,5 +204,5 @@ func getTitle(item *components.Metadata) string {
 	if item.Title != "" {
 		return item.Title
 	}
-	return "Unknown"
+	return plexclient.DefaultUnknownTitle
 }

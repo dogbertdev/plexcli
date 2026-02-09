@@ -17,9 +17,21 @@ import (
 )
 
 const (
-	DefaultTimeout    = 120 * time.Second
-	DefaultMaxRetries = 3
-	DefaultPageSize   = 100
+	DefaultTimeout           = 120 * time.Second
+	DefaultMaxRetries        = 3
+	DefaultPageSize          = 100
+	DefaultConcurrentWorkers = 4
+	DefaultHistoryLimit      = 50
+	RetryInitialIntervalMS   = 1000
+	RetryMaxIntervalMS       = 30000
+	RetryExponent            = 2.0
+	MaxBackoffDuration       = 30 * time.Second
+	DefaultClientID          = "plexcli"
+	DefaultProduct           = "plexcli"
+	DefaultVersion           = "1.0.0"
+	DefaultPlatform          = "Go"
+	DefaultUnknownTitle      = "Unknown"
+	DefaultLibraryPathPrefix = "/library/sections/"
 )
 
 type Library struct {
@@ -73,7 +85,7 @@ func NewClient(serverURL, token string, opts ...ClientOption) (*Client, error) {
 		token:      token,
 		timeout:    DefaultTimeout,
 		maxRetries: DefaultMaxRetries,
-		clientID:   "plexcli",
+		clientID:   DefaultClientID,
 	}
 
 	for _, opt := range opts {
@@ -83,9 +95,9 @@ func NewClient(serverURL, token string, opts ...ClientOption) (*Client, error) {
 	retryConfig := retry.Config{
 		Strategy: "backoff",
 		Backoff: &retry.BackoffStrategy{
-			InitialInterval: 1000,
-			MaxInterval:     30000,
-			Exponent:        2.0,
+			InitialInterval: RetryInitialIntervalMS,
+			MaxInterval:     RetryMaxIntervalMS,
+			Exponent:        RetryExponent,
 		},
 		RetryConnectionErrors: true,
 	}
@@ -96,9 +108,9 @@ func NewClient(serverURL, token string, opts ...ClientOption) (*Client, error) {
 		plexgo.WithTimeout(client.timeout),
 		plexgo.WithRetryConfig(retryConfig),
 		plexgo.WithClientIdentifier(client.clientID),
-		plexgo.WithProduct("plexcli"),
-		plexgo.WithVersion("1.0.0"),
-		plexgo.WithPlatform("Go"),
+		plexgo.WithProduct(DefaultProduct),
+		plexgo.WithVersion(DefaultVersion),
+		plexgo.WithPlatform(DefaultPlatform),
 	)
 
 	client.sdk = sdk
@@ -152,9 +164,9 @@ func (c *Client) executeWithRetry(ctx context.Context, op string, fn func() erro
 				return err
 			}
 
-			backoff := time.Duration(math.Pow(2, float64(attempt))) * time.Second
-			if backoff > 30*time.Second {
-				backoff = 30 * time.Second
+			backoff := time.Duration(math.Pow(RetryExponent, float64(attempt))) * time.Second
+			if backoff > MaxBackoffDuration {
+				backoff = MaxBackoffDuration
 			}
 
 			timer := time.NewTimer(backoff)
@@ -214,7 +226,7 @@ func (c *Client) GetAllLibraryItems(ctx context.Context, sectionID string) ([]*c
 
 func (c *Client) GetLibraryItemsConcurrent(ctx context.Context, sectionIDs []string, maxConcurrent int) ([]*components.Metadata, error) {
 	if maxConcurrent <= 0 {
-		maxConcurrent = 4
+		maxConcurrent = DefaultConcurrentWorkers
 	}
 
 	if len(sectionIDs) == 0 {
@@ -372,7 +384,7 @@ type HistoryItem struct {
 
 func (c *Client) GetHistory(ctx context.Context, limit int) ([]HistoryItem, error) {
 	if limit <= 0 {
-		limit = 50
+		limit = DefaultHistoryLimit
 	}
 
 	var historyItems []HistoryItem
@@ -444,7 +456,7 @@ func (c *Client) GetSections(ctx context.Context) ([]Library, error) {
 
 	err := c.executeWithRetry(ctx, "GetSections", func() error {
 		// Make raw HTTP request to avoid SDK unmarshaling bug with 'hidden' field
-		url := fmt.Sprintf("%s/library/sections", c.serverURL)
+		url := c.serverURL + "/library/sections"
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return fmt.Errorf("failed to create request: %w", err)
@@ -484,7 +496,7 @@ func (c *Client) GetSections(ctx context.Context) ([]Library, error) {
 			}
 			key := section.Key
 			if key == "" {
-				key = "/library/sections/" + section.UUID
+				key = DefaultLibraryPathPrefix + section.UUID
 			}
 
 			lib := Library{

@@ -9,6 +9,13 @@ import (
 	"github.com/yosuke-furukawa/json5/encoding/json5"
 )
 
+const (
+	filePermissions = 0600
+	dirPermissions  = 0700
+	configDir       = "plexcli"
+	configFilename  = "config.json"
+)
+
 // Config represents the application configuration.
 type Config struct {
 	ServerURL string `json:"server_url"`
@@ -18,13 +25,12 @@ type Config struct {
 	Timeout   int    `json:"timeout"`
 }
 
-// ConfigPath returns the default configuration file path: ~/.config/plexcli/config.json
 func ConfigPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get user home directory: %w", err)
 	}
-	return filepath.Join(home, ".config", "plexcli", "config.json"), nil
+	return filepath.Join(home, ".config", configDir, configFilename), nil
 }
 
 // ExpandPath expands the tilde (~) in a path to the user's home directory.
@@ -92,7 +98,7 @@ func WriteConfig(cfg *Config) error {
 	}
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, dirPermissions); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -101,9 +107,8 @@ func WriteConfig(cfg *Config) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	// Atomic write using a temporary file
 	tmpFile := path + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0600); err != nil {
+	if err := os.WriteFile(tmpFile, data, filePermissions); err != nil {
 		return fmt.Errorf("failed to write temporary config file: %w", err)
 	}
 

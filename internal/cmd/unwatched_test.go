@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/LukeHagar/plexgo/models/components"
-	"github.com/user/plexcli/internal/outfmt"
 )
 
 func intPtrUnwatched(i int) *int {
@@ -94,10 +93,10 @@ func TestUnwatchedCmd_filterByType(t *testing.T) {
 			types:    map[string]bool{"movie": true},
 		},
 		{
-			name:     "tv only",
-			cmd:      UnwatchedCmd{Type: "tv"},
-			expected: 3,
-			types:    map[string]bool{"show": true, "season": true, "episode": true},
+			name:     "episode only",
+			cmd:      UnwatchedCmd{Type: "episode"},
+			expected: 2,
+			types:    map[string]bool{"show": true, "episode": true},
 		},
 	}
 
@@ -197,27 +196,27 @@ func TestUnwatchedCmd_output(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		format outfmt.Format
+		output string
 	}{
 		{
 			name:   "table format",
-			format: outfmt.Table,
+			output: "table",
 		},
 		{
 			name:   "json format",
-			format: outfmt.JSON,
+			output: "json",
 		},
 		{
 			name:   "tsv format",
-			format: outfmt.TSV,
+			output: "tsv",
 		},
 	}
 
-	cmd := &UnwatchedCmd{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			cmd := &UnwatchedCmd{Output: tt.output}
 			var buf bytes.Buffer
-			err := cmd.output(&buf, items, tt.format)
+			err := cmd.output(&buf, items)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
@@ -233,9 +232,9 @@ func TestUnwatchedCmd_outputJSON(t *testing.T) {
 		{Title: "Test Movie", Year: 2023, Type: "movie", AddedAt: "2024-01-15"},
 	}
 
-	cmd := &UnwatchedCmd{}
+	cmd := &UnwatchedCmd{Output: "json"}
 	var buf bytes.Buffer
-	err := cmd.output(&buf, items, outfmt.JSON)
+	err := cmd.output(&buf, items)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -254,9 +253,9 @@ func TestUnwatchedCmd_outputTSV(t *testing.T) {
 		{Title: "Test Movie", Year: 2023, Type: "movie", AddedAt: "2024-01-15"},
 	}
 
-	cmd := &UnwatchedCmd{}
+	cmd := &UnwatchedCmd{Output: "tsv"}
 	var buf bytes.Buffer
-	err := cmd.output(&buf, items, outfmt.TSV)
+	err := cmd.output(&buf, items)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}

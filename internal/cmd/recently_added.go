@@ -15,7 +15,6 @@ import (
 	"github.com/user/plexcli/internal/ui"
 )
 
-// RecentlyAddedCmd represents the recently added command
 type RecentlyAddedCmd struct {
 	Limit  int    `help:"Maximum number of items to show" default:"50"`
 	Days   int    `help:"Only show items added in the last N days" default:"7"`
@@ -23,7 +22,6 @@ type RecentlyAddedCmd struct {
 	Output string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
-// RecentlyAddedItem represents a recently added item
 type RecentlyAddedItem struct {
 	Title   string    `json:"title"`
 	Year    int       `json:"year,omitempty"`
@@ -31,13 +29,12 @@ type RecentlyAddedItem struct {
 	AddedAt time.Time `json:"added_at"`
 }
 
-// Run executes the recently added command
 func (c *RecentlyAddedCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("configuration error: %w", err)
 	}
 
-	authCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
 	defer cancel()
 
 	token, err := auth.GetToken(authCtx, *cfg)
@@ -161,5 +158,5 @@ func recentlyGetTitle(item *components.Metadata) string {
 	if item.Title != "" {
 		return item.Title
 	}
-	return "Unknown"
+	return plexclient.DefaultUnknownTitle
 }

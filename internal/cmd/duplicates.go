@@ -45,7 +45,7 @@ func (c *DuplicatesCmd) Run(ctx *kong.Context, ui *ui.UI, cfg *config.Config) er
 	}
 
 	// Get authentication token
-	authCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
 	defer cancel()
 
 	token, err := auth.GetToken(authCtx, *cfg)

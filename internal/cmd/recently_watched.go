@@ -34,7 +34,7 @@ func (c *RecentlyWatchedCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config
 		return fmt.Errorf("configuration error: %w", err)
 	}
 
-	authCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
 	defer cancel()
 
 	token, err := auth.GetToken(authCtx, *cfg)
@@ -92,7 +92,7 @@ func (c *RecentlyWatchedCmd) processHistory(ctx context.Context, history []plexc
 	}
 
 	var sections []plexclient.Library
-	if len(history) > 0 {
+	if len(history) > 0 && client != nil {
 		sections, _ = client.GetSections(ctx)
 	}
 

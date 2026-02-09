@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/LukeHagar/plexgo"
@@ -19,6 +18,8 @@ const (
 	DefaultProduct  = "plexcli"
 	DefaultVersion  = "1.0.0"
 	DefaultPlatform = "Go"
+	StatusOK        = 200
+	StatusCreated   = 201
 )
 
 var (
@@ -65,7 +66,7 @@ func (t *TokenAuth) Authenticate(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("%w: %v", ErrInvalidToken, err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != StatusOK {
 		return "", fmt.Errorf("%w: received status %d", ErrInvalidToken, resp.StatusCode)
 	}
 
@@ -132,7 +133,7 @@ func (p *PasswordAuth) Authenticate(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("%w: %v", ErrInvalidCredentials, err)
 	}
 
-	if resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != StatusCreated {
 		return "", fmt.Errorf("%w: received status %d", ErrAuthFailed, resp.StatusCode)
 	}
 
@@ -206,7 +207,9 @@ func GetTokenAndStore(ctx context.Context, cfg config.Config) (string, error) {
 	if token != cfg.Token {
 		cfg.Token = token
 		cfg.Password = ""
-		_ = config.WriteConfig(&cfg)
+		if err := config.WriteConfig(&cfg); err != nil {
+			return token, nil
+		}
 	}
 
 	return token, nil

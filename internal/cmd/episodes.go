@@ -6,6 +6,7 @@ import (
 	"io"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/LukeHagar/plexgo/models/components"
@@ -17,14 +18,12 @@ import (
 	"github.com/user/plexcli/internal/ui"
 )
 
-// EpisodesMissingCmd represents the episodes missing command
 type EpisodesMissingCmd struct {
 	Show   string `help:"Filter by specific show name" default:""`
 	Season int    `help:"Filter by specific season number (0 = all seasons)" default:"0"`
 	Output string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
-// EpisodeGap represents missing episodes in a season
 type EpisodeGap struct {
 	Show            string `json:"show"`
 	Season          int    `json:"season"`
@@ -32,13 +31,12 @@ type EpisodeGap struct {
 	TotalEpisodes   int    `json:"total_episodes"`
 }
 
-// Run executes the episodes missing command
 func (c *EpisodesMissingCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("configuration error: %w", err)
 	}
 
-	authCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
 	defer cancel()
 
 	token, err := auth.GetToken(authCtx, *cfg)
@@ -207,7 +205,7 @@ func episodesGetShowTitle(ep *components.Metadata) string {
 	if ep.Title != "" {
 		return ep.Title
 	}
-	return "Unknown"
+	return plexclient.DefaultUnknownTitle
 }
 
 func formatEpisodeList(episodes []int) string {
@@ -243,12 +241,14 @@ func formatEpisodeList(episodes []int) string {
 }
 
 func joinStrings(parts []string, separator string) string {
-	result := ""
-	for i, part := range parts {
-		if i > 0 {
-			result += separator
-		}
-		result += part
+	if len(parts) == 0 {
+		return ""
 	}
-	return result
+	var b strings.Builder
+	b.WriteString(parts[0])
+	for i := 1; i < len(parts); i++ {
+		b.WriteString(separator)
+		b.WriteString(parts[i])
+	}
+	return b.String()
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/LukeHagar/plexgo/models/components"
@@ -15,14 +16,12 @@ import (
 	"github.com/user/plexcli/internal/ui"
 )
 
-// MetadataMissingCmd represents the metadata missing command
 type MetadataMissingCmd struct {
 	Section string `help:"Library section ID to scan (empty = all sections)" default:""`
 	Type    string `help:"Filter by type: movie, episode, or all" default:"all" enum:"movie,episode,all"`
 	Output  string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
-// MetadataInfo represents metadata information for an item
 type MetadataInfo struct {
 	Title         string   `json:"title"`
 	Year          int      `json:"year,omitempty"`
@@ -30,13 +29,12 @@ type MetadataInfo struct {
 	MissingFields []string `json:"missing_fields"`
 }
 
-// Run executes the metadata missing command
 func (c *MetadataMissingCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("configuration error: %w", err)
 	}
 
-	authCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
 	defer cancel()
 
 	token, err := auth.GetToken(authCtx, *cfg)
@@ -183,16 +181,18 @@ func metadataGetTitle(item *components.Metadata) string {
 	if item.Title != "" {
 		return item.Title
 	}
-	return "Unknown"
+	return plexclient.DefaultUnknownTitle
 }
 
 func joinMetadataStrings(parts []string, separator string) string {
-	result := ""
-	for i, part := range parts {
-		if i > 0 {
-			result += separator
-		}
-		result += part
+	if len(parts) == 0 {
+		return ""
 	}
-	return result
+	var b strings.Builder
+	b.WriteString(parts[0])
+	for i := 1; i < len(parts); i++ {
+		b.WriteString(separator)
+		b.WriteString(parts[i])
+	}
+	return b.String()
 }
