@@ -28,16 +28,19 @@ type CLI struct {
 	Timeout int    `help:"Request timeout in seconds" default:"120"`
 
 	// Subcommands
-	Unwatched  cmd.UnwatchedCmd        `cmd:"" help:"List unwatched items in the library"`
-	Recently   cmd.RecentlyWatchedCmd  `cmd:"" name:"recently-watched" help:"List recently watched items"`
-	Added      cmd.RecentlyAddedCmd    `cmd:"" name:"recently-added" help:"List recently added items"`
-	Duplicates cmd.DuplicatesCmd       `cmd:"" help:"Find duplicate media files"`
-	FilePaths  cmd.FilePathsCmd        `cmd:"" name:"file-paths" help:"List file paths for media items"`
-	Subtitles  cmd.SubtitlesMissingCmd `cmd:"" name:"subtitles-missing" help:"Find items missing subtitle languages"`
-	Audio      cmd.AudioCheckCmd       `cmd:"" name:"audio-check" help:"Check audio codec and channel configuration"`
-	Episodes   cmd.EpisodesMissingCmd  `cmd:"" name:"episodes-missing" help:"Find missing episodes in TV series"`
-	Quality    cmd.QualityCheckCmd     `cmd:"" name:"quality-check" help:"Check video quality (resolution, HDR)"`
-	Metadata   cmd.MetadataMissingCmd  `cmd:"" name:"metadata-missing" help:"Find items with incomplete metadata"`
+	Unwatched    cmd.UnwatchedCmd        `cmd:"" help:"List unwatched items in the library"`
+	Recently     cmd.RecentlyWatchedCmd  `cmd:"" name:"recently-watched" help:"List recently watched items"`
+	Added        cmd.RecentlyAddedCmd    `cmd:"" name:"recently-added" help:"List recently added items"`
+	Duplicates   cmd.DuplicatesCmd       `cmd:"" help:"Find duplicate media files"`
+	FilePaths    cmd.FilePathsCmd        `cmd:"" name:"file-paths" help:"List file paths for media items"`
+	Subtitles    cmd.SubtitlesMissingCmd `cmd:"" name:"subtitles-missing" help:"Find items missing subtitle languages"`
+	Audio        cmd.AudioCheckCmd       `cmd:"" name:"audio-check" help:"Check audio codec and channel configuration"`
+	EpisodesMiss cmd.EpisodesMissingCmd  `cmd:"" name:"episodes-missing" help:"Find missing episodes in TV series"`
+	Quality      cmd.QualityCheckCmd     `cmd:"" name:"quality-check" help:"Check video quality (resolution, HDR)"`
+	Metadata     cmd.MetadataMissingCmd  `cmd:"" name:"metadata-missing" help:"Find items with incomplete metadata"`
+	Search       cmd.SearchCmd           `cmd:"" help:"Search the Plex library"`
+	Playlist     cmd.PlaylistCmd         `cmd:"" help:"Manage playlists"`
+	Episodes     cmd.EpisodesListCmd     `cmd:"" help:"List episodes for a show with optional filtering"`
 }
 
 func main() {
@@ -122,9 +125,15 @@ func applyOutputFormat(cli *CLI, format string) {
 	cli.FilePaths.Output = format
 	cli.Subtitles.Output = format
 	cli.Audio.Output = format
-	cli.Episodes.Output = format
+	cli.EpisodesMiss.Output = format
 	cli.Quality.Output = format
 	cli.Metadata.Output = format
+	cli.Search.Output = format
+	cli.Playlist.List.Output = format
+	cli.Playlist.Create.Output = format
+	cli.Playlist.Add.Output = format
+	cli.Playlist.Show.Output = format
+	cli.Episodes.Output = format
 }
 
 // loadConfig loads configuration from file and/or environment/cli flags
