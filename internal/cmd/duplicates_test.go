@@ -307,6 +307,217 @@ func TestDuplicateGroup_structure(t *testing.T) {
 	}
 }
 
+func TestDuplicatesCmd_generateKey_withEditions(t *testing.T) {
+	tests := []struct {
+		name                  string
+		editionsAreDuplicates bool
+		item                  *components.Metadata
+		expected              string
+	}{
+		{
+			name:                  "movie with edition - editions are not duplicates",
+			editionsAreDuplicates: false,
+			item: &components.Metadata{
+				Title:                "Blade Runner",
+				Type:                 "movie",
+				Year:                 intPtr(1982),
+				AdditionalProperties: map[string]any{"editionTitle": "Director's Cut"},
+			},
+			expected: "movie:blade runner:1982:director's cut",
+		},
+		{
+			name:                  "movie with edition - editions are duplicates",
+			editionsAreDuplicates: true,
+			item: &components.Metadata{
+				Title:                "Blade Runner",
+				Type:                 "movie",
+				Year:                 intPtr(1982),
+				AdditionalProperties: map[string]any{"editionTitle": "Director's Cut"},
+			},
+			expected: "movie:blade runner:1982",
+		},
+		{
+			name:                  "movie without edition - editions are not duplicates",
+			editionsAreDuplicates: false,
+			item: &components.Metadata{
+				Title: "The Matrix",
+				Type:  "movie",
+				Year:  intPtr(1999),
+			},
+			expected: "movie:the matrix:1999",
+		},
+		{
+			name:                  "movie without edition - editions are duplicates",
+			editionsAreDuplicates: true,
+			item: &components.Metadata{
+				Title: "The Matrix",
+				Type:  "movie",
+				Year:  intPtr(1999),
+			},
+			expected: "movie:the matrix:1999",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := &DuplicatesCmd{EditionsAreDuplicates: tt.editionsAreDuplicates}
+			result := cmd.generateKey(tt.item)
+			if result != tt.expected {
+				t.Errorf("generateKey() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDuplicatesCmd_findDuplicates_editionsNotDuplicatesByDefault(t *testing.T) {
+	cmd := &DuplicatesCmd{
+		Type:                  "all",
+		MinCount:              2,
+		EditionsAreDuplicates: false,
+	}
+
+	items := []*components.Metadata{
+		{
+			Title:                "Blade Runner",
+			Type:                 "movie",
+			Year:                 intPtr(1982),
+			RatingKey:            stringPtr("1"),
+			AdditionalProperties: map[string]any{"editionTitle": "Director's Cut"},
+		},
+		{
+			Title:                "Blade Runner",
+			Type:                 "movie",
+			Year:                 intPtr(1982),
+			RatingKey:            stringPtr("2"),
+			AdditionalProperties: map[string]any{"editionTitle": "Final Cut"},
+		},
+		{
+			Title:                "Blade Runner",
+			Type:                 "movie",
+			Year:                 intPtr(1982),
+			RatingKey:            stringPtr("3"),
+			AdditionalProperties: map[string]any{"editionTitle": "Theatrical Cut"},
+		},
+	}
+
+	result := cmd.findDuplicates(items)
+
+	if len(result) != 0 {
+		t.Errorf("Expected 0 duplicate groups (different editions), got %d", len(result))
+	}
+}
+
+func TestDuplicatesCmd_findDuplicates_editionsAreDuplicatesWhenFlagSet(t *testing.T) {
+	cmd := &DuplicatesCmd{
+		Type:                  "all",
+		MinCount:              2,
+		EditionsAreDuplicates: true,
+	}
+
+	items := []*components.Metadata{
+		{
+			Title:                "Blade Runner",
+			Type:                 "movie",
+			Year:                 intPtr(1982),
+			RatingKey:            stringPtr("1"),
+			AdditionalProperties: map[string]any{"editionTitle": "Director's Cut"},
+		},
+		{
+			Title:                "Blade Runner",
+			Type:                 "movie",
+			Year:                 intPtr(1982),
+			RatingKey:            stringPtr("2"),
+			AdditionalProperties: map[string]any{"editionTitle": "Final Cut"},
+		},
+	}
+
+	result := cmd.findDuplicates(items)
+
+	if len(result) != 1 {
+		t.Errorf("Expected 1 duplicate group (editions treated as duplicates), got %d", len(result))
+	}
+
+	if len(result) > 0 && result[0].Count != 2 {
+		t.Errorf("Expected count of 2, got %d", result[0].Count)
+	}
+}
+
+func TestDuplicatesCmd_getEditionTitle(t *testing.T) {
+	cmd := &DuplicatesCmd{}
+
+	tests := []struct {
+		name     string
+		item     *components.Metadata
+		expected string
+	}{
+		{
+			name:     "nil item",
+			item:     nil,
+			expected: "",
+		},
+		{
+			name: "no additional properties",
+			item: &components.Metadata{
+				Title: "Test",
+				Type:  "movie",
+			},
+			expected: "",
+		},
+		{
+			name: "empty additional properties",
+			item: &components.Metadata{
+				Title:                "Test",
+				Type:                 "movie",
+				AdditionalProperties: map[string]any{},
+			},
+			expected: "",
+		},
+		{
+			name: "has edition title",
+			item: &components.Metadata{
+				Title:                "Test",
+				Type:                 "movie",
+				AdditionalProperties: map[string]any{"editionTitle": "Director's Cut"},
+			},
+			expected: "Director's Cut",
+		},
+		{
+			name: "edition title wrong type",
+			item: &components.Metadata{
+				Title:                "Test",
+				Type:                 "movie",
+				AdditionalProperties: map[string]any{"editionTitle": 123},
+			},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := cmd.getEditionTitle(tt.item)
+			if result != tt.expected {
+				t.Errorf("getEditionTitle() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDuplicateGroup_withEdition(t *testing.T) {
+	group := DuplicateGroup{
+		Key:        "movie:blade runner:1982:director's cut",
+		Title:      "Blade Runner",
+		Year:       1982,
+		Edition:    "Director's Cut",
+		Type:       "movie",
+		Count:      2,
+		RatingKeys: []string{"1", "2"},
+	}
+
+	if group.Edition != "Director's Cut" {
+		t.Errorf("Edition = %v, want Director's Cut", group.Edition)
+	}
+}
+
 func intPtr(i int) *int {
 	return &i
 }
