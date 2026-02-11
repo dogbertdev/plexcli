@@ -1,16 +1,12 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/auth"
 	"github.com/user/plexcli/internal/config"
 	"github.com/user/plexcli/internal/outfmt"
-	"github.com/user/plexcli/internal/plexclient"
 	"github.com/user/plexcli/internal/ui"
 )
 
@@ -39,32 +35,13 @@ type PlaylistListItem struct {
 }
 
 func (c *PlaylistListCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
-
-	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
-	defer cancel()
-
-	token, err := auth.GetToken(authCtx, *cfg)
+	cc, err := NewClientContext(cfg)
 	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
+		return err
 	}
+	defer cc.Cancel()
 
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if cfg.Timeout == 0 {
-		timeout = plexclient.DefaultTimeout
-	}
-
-	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
-	if err != nil {
-		return fmt.Errorf("failed to create plex client: %w", err)
-	}
-
-	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	playlists, err := client.ListPlaylists(fetchCtx)
+	playlists, err := cc.Client.ListPlaylists(cc.Ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list playlists: %w", err)
 	}
@@ -128,32 +105,13 @@ type PlaylistCreateResult struct {
 }
 
 func (c *PlaylistCreateCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
-
-	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
-	defer cancel()
-
-	token, err := auth.GetToken(authCtx, *cfg)
+	cc, err := NewClientContext(cfg)
 	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
+		return err
 	}
+	defer cc.Cancel()
 
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if cfg.Timeout == 0 {
-		timeout = plexclient.DefaultTimeout
-	}
-
-	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
-	if err != nil {
-		return fmt.Errorf("failed to create plex client: %w", err)
-	}
-
-	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	playlist, err := client.CreatePlaylist(fetchCtx, c.Name, c.Type, c.Items)
+	playlist, err := cc.Client.CreatePlaylist(cc.Ctx, c.Name, c.Type, c.Items)
 	if err != nil {
 		return fmt.Errorf("failed to create playlist: %w", err)
 	}
@@ -192,42 +150,22 @@ type PlaylistSmartCmd struct {
 }
 
 func (c *PlaylistSmartCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
-
 	if c.Director == "" {
 		return fmt.Errorf("at least one filter is required (e.g., --director)")
 	}
 
-	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
-	defer cancel()
-
-	token, err := auth.GetToken(authCtx, *cfg)
+	cc, err := NewClientContext(cfg)
 	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
+		return err
 	}
+	defer cc.Cancel()
 
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if cfg.Timeout == 0 {
-		timeout = plexclient.DefaultTimeout
-	}
-
-	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
-	if err != nil {
-		return fmt.Errorf("failed to create plex client: %w", err)
-	}
-
-	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	// Look up director ID
-	directorID, err := client.GetDirectorID(fetchCtx, c.Section, c.Director)
+	directorID, err := cc.Client.GetDirectorID(cc.Ctx, c.Section, c.Director)
 	if err != nil {
 		return fmt.Errorf("failed to find director: %w", err)
 	}
 
-	playlist, err := client.CreateSmartPlaylist(fetchCtx, c.Name, c.Type, c.Section, "director", directorID)
+	playlist, err := cc.Client.CreateSmartPlaylist(cc.Ctx, c.Name, c.Type, c.Section, "director", directorID)
 	if err != nil {
 		return fmt.Errorf("failed to create smart playlist: %w", err)
 	}
@@ -270,36 +208,17 @@ type PlaylistAddResult struct {
 }
 
 func (c *PlaylistAddCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
-
 	if len(c.Items) == 0 {
 		return fmt.Errorf("at least one item rating key is required")
 	}
 
-	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
-	defer cancel()
-
-	token, err := auth.GetToken(authCtx, *cfg)
+	cc, err := NewClientContext(cfg)
 	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
+		return err
 	}
+	defer cc.Cancel()
 
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if cfg.Timeout == 0 {
-		timeout = plexclient.DefaultTimeout
-	}
-
-	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
-	if err != nil {
-		return fmt.Errorf("failed to create plex client: %w", err)
-	}
-
-	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	err = client.AddToPlaylist(fetchCtx, c.Playlist, c.Items)
+	err = cc.Client.AddToPlaylist(cc.Ctx, c.Playlist, c.Items)
 	if err != nil {
 		return fmt.Errorf("failed to add items to playlist: %w", err)
 	}
@@ -341,32 +260,13 @@ type PlaylistShowItem struct {
 }
 
 func (c *PlaylistShowCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
-
-	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
-	defer cancel()
-
-	token, err := auth.GetToken(authCtx, *cfg)
+	cc, err := NewClientContext(cfg)
 	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
+		return err
 	}
+	defer cc.Cancel()
 
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if cfg.Timeout == 0 {
-		timeout = plexclient.DefaultTimeout
-	}
-
-	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
-	if err != nil {
-		return fmt.Errorf("failed to create plex client: %w", err)
-	}
-
-	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	items, err := client.GetPlaylistItems(fetchCtx, c.Playlist)
+	items, err := cc.Client.GetPlaylistItems(cc.Ctx, c.Playlist)
 	if err != nil {
 		return fmt.Errorf("failed to get playlist items: %w", err)
 	}
@@ -446,32 +346,13 @@ type PlaylistDeleteResult struct {
 }
 
 func (c *PlaylistDeleteCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
-
-	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
-	defer cancel()
-
-	token, err := auth.GetToken(authCtx, *cfg)
+	cc, err := NewClientContext(cfg)
 	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
+		return err
 	}
+	defer cc.Cancel()
 
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if cfg.Timeout == 0 {
-		timeout = plexclient.DefaultTimeout
-	}
-
-	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
-	if err != nil {
-		return fmt.Errorf("failed to create plex client: %w", err)
-	}
-
-	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	err = client.DeletePlaylist(fetchCtx, c.Playlist)
+	err = cc.Client.DeletePlaylist(cc.Ctx, c.Playlist)
 	if err != nil {
 		return fmt.Errorf("failed to delete playlist: %w", err)
 	}

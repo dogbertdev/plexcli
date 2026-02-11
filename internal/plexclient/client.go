@@ -13,9 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/LukeHagar/plexgo"
 	"github.com/LukeHagar/plexgo/models/components"
-	"github.com/LukeHagar/plexgo/retry"
 )
 
 const (
@@ -24,18 +22,14 @@ const (
 	DefaultPageSize          = 100
 	DefaultConcurrentWorkers = 4
 	DefaultHistoryLimit      = 50
-	RetryInitialIntervalMS   = 1000
-	RetryMaxIntervalMS       = 30000
+	DefaultSearchLimit       = 50
 	RetryExponent            = 2.0
 	MaxBackoffDuration       = 30 * time.Second
 	DefaultClientID          = "plexcli"
-	DefaultProduct           = "plexcli"
-	DefaultVersion           = "1.0.0"
-	DefaultPlatform          = "Go"
-	DefaultUnknownTitle      = "Unknown"
 	DefaultLibraryPathPrefix = "/library/sections/"
 )
 
+// Library represents a Plex library section.
 type Library struct {
 	ID       string
 	Title    *string
@@ -45,32 +39,25 @@ type Library struct {
 	Location []string
 }
 
+// Client provides access to a Plex server.
 type Client struct {
-	sdk        *plexgo.PlexAPI
+	httpClient *http.Client
 	serverURL  string
 	token      string
-	timeout    time.Duration
 	maxRetries int
-	clientID   string
 }
 
 type ClientOption func(*Client)
 
 func WithTimeout(timeout time.Duration) ClientOption {
 	return func(c *Client) {
-		c.timeout = timeout
+		c.httpClient.Timeout = timeout
 	}
 }
 
 func WithMaxRetries(maxRetries int) ClientOption {
 	return func(c *Client) {
 		c.maxRetries = maxRetries
-	}
-}
-
-func WithClientID(clientID string) ClientOption {
-	return func(c *Client) {
-		c.clientID = clientID
 	}
 }
 
@@ -83,43 +70,20 @@ func NewClient(serverURL, token string, opts ...ClientOption) (*Client, error) {
 	}
 
 	client := &Client{
+		httpClient: &http.Client{Timeout: DefaultTimeout},
 		serverURL:  serverURL,
 		token:      token,
-		timeout:    DefaultTimeout,
 		maxRetries: DefaultMaxRetries,
-		clientID:   DefaultClientID,
 	}
 
 	for _, opt := range opts {
 		opt(client)
 	}
 
-	retryConfig := retry.Config{
-		Strategy: "backoff",
-		Backoff: &retry.BackoffStrategy{
-			InitialInterval: RetryInitialIntervalMS,
-			MaxInterval:     RetryMaxIntervalMS,
-			Exponent:        RetryExponent,
-		},
-		RetryConnectionErrors: true,
-	}
-
-	sdk := plexgo.New(
-		plexgo.WithServerURL(serverURL),
-		plexgo.WithSecurity(token),
-		plexgo.WithTimeout(client.timeout),
-		plexgo.WithRetryConfig(retryConfig),
-		plexgo.WithClientIdentifier(client.clientID),
-		plexgo.WithProduct(DefaultProduct),
-		plexgo.WithVersion(DefaultVersion),
-		plexgo.WithPlatform(DefaultPlatform),
-	)
-
-	client.sdk = sdk
-
 	return client, nil
 }
 
+// PlexError provides structured error information for Plex API operations.
 type PlexError struct {
 	Op      string
 	Section string
@@ -246,8 +210,7 @@ func (c *Client) GetAllLibraryItems(ctx context.Context, sectionID string) ([]*c
 
 		req.Header.Set("Accept", "application/json")
 
-		httpClient := &http.Client{Timeout: c.timeout}
-		resp, err := httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to make request: %w", err)
 		}
@@ -299,8 +262,7 @@ func (c *Client) GetItemMetadata(ctx context.Context, ratingKey string) (*compon
 
 		req.Header.Set("Accept", "application/json")
 
-		httpClient := &http.Client{Timeout: c.timeout}
-		resp, err := httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to make request: %w", err)
 		}
@@ -515,8 +477,7 @@ func (c *Client) GetHistory(ctx context.Context, limit int) ([]HistoryItem, erro
 
 		req.Header.Set("Accept", "application/json")
 
-		httpClient := &http.Client{Timeout: c.timeout}
-		resp, err := httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to make request: %w", err)
 		}
@@ -594,8 +555,7 @@ func (c *Client) GetSections(ctx context.Context) ([]Library, error) {
 
 		req.Header.Set("X-Plex-Token", c.token)
 
-		httpClient := &http.Client{Timeout: c.timeout}
-		resp, err := httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to make request: %w", err)
 		}
@@ -658,7 +618,7 @@ func (c *Client) GetServerURL() string {
 }
 
 func (c *Client) GetTimeout() time.Duration {
-	return c.timeout
+	return c.httpClient.Timeout
 }
 
 func (c *Client) GetMaxRetries() int {
@@ -733,8 +693,7 @@ func (c *Client) SearchLibrary(ctx context.Context, query string, sectionID *str
 
 		req.Header.Set("Accept", "application/json")
 
-		httpClient := &http.Client{Timeout: c.timeout}
-		resp, err := httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to make request: %w", err)
 		}
@@ -827,8 +786,7 @@ func (c *Client) ListPlaylists(ctx context.Context) ([]PlaylistInfo, error) {
 
 		req.Header.Set("Accept", "application/json")
 
-		httpClient := &http.Client{Timeout: c.timeout}
-		resp, err := httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to make request: %w", err)
 		}
@@ -895,8 +853,7 @@ func (c *Client) GetServerUUID(ctx context.Context) (string, error) {
 
 		req.Header.Set("Accept", "application/json")
 
-		httpClient := &http.Client{Timeout: c.timeout}
-		resp, err := httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to make request: %w", err)
 		}
@@ -963,7 +920,7 @@ func (c *Client) CreatePlaylist(ctx context.Context, title string, playlistType 
 		if len(ratingKeys) > 0 {
 			// URI format: server://{uuid}/com.plexapp.plugins.library/library/metadata/{key1},{key2},...
 			uri := fmt.Sprintf("server://%s/com.plexapp.plugins.library/library/metadata/%s",
-				serverUUID, joinStrings(ratingKeys, ","))
+				serverUUID, strings.Join(ratingKeys, ","))
 			urlStr += fmt.Sprintf("&uri=%s", url.QueryEscape(uri))
 		}
 
@@ -974,8 +931,7 @@ func (c *Client) CreatePlaylist(ctx context.Context, title string, playlistType 
 
 		req.Header.Set("Accept", "application/json")
 
-		httpClient := &http.Client{Timeout: c.timeout}
-		resp, err := httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to make request: %w", err)
 		}
@@ -1079,8 +1035,7 @@ func (c *Client) CreateSmartPlaylist(ctx context.Context, title string, playlist
 
 		req.Header.Set("Accept", "application/json")
 
-		httpClient := &http.Client{Timeout: c.timeout}
-		resp, err := httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to make request: %w", err)
 		}
@@ -1176,7 +1131,7 @@ func (c *Client) AddToPlaylist(ctx context.Context, playlistID string, ratingKey
 	err = c.executeWithRetry(ctx, "AddToPlaylist", func() error {
 		// URI format: server://{uuid}/com.plexapp.plugins.library/library/metadata/{key1},{key2},...
 		uri := fmt.Sprintf("server://%s/com.plexapp.plugins.library/library/metadata/%s",
-			serverUUID, joinStrings(ratingKeys, ","))
+			serverUUID, strings.Join(ratingKeys, ","))
 
 		urlStr := fmt.Sprintf("%s/playlists/%s/items?uri=%s&X-Plex-Token=%s",
 			c.serverURL, playlistID, url.QueryEscape(uri), c.token)
@@ -1188,8 +1143,7 @@ func (c *Client) AddToPlaylist(ctx context.Context, playlistID string, ratingKey
 
 		req.Header.Set("Accept", "application/json")
 
-		httpClient := &http.Client{Timeout: c.timeout}
-		resp, err := httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to make request: %w", err)
 		}
@@ -1231,8 +1185,7 @@ func (c *Client) DeletePlaylist(ctx context.Context, playlistID string) error {
 			return fmt.Errorf("failed to create request: %w", err)
 		}
 
-		httpClient := &http.Client{Timeout: c.timeout}
-		resp, err := httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to make request: %w", err)
 		}
@@ -1278,8 +1231,7 @@ func (c *Client) GetPlaylistItems(ctx context.Context, playlistID string) ([]Sea
 
 		req.Header.Set("Accept", "application/json")
 
-		httpClient := &http.Client{Timeout: c.timeout}
-		resp, err := httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to make request: %w", err)
 		}
@@ -1342,18 +1294,6 @@ func (c *Client) GetPlaylistItems(ctx context.Context, playlistID string) ([]Sea
 	return items, nil
 }
 
-// joinStrings joins a slice of strings with a separator
-func joinStrings(strs []string, sep string) string {
-	if len(strs) == 0 {
-		return ""
-	}
-	result := strs[0]
-	for i := 1; i < len(strs); i++ {
-		result += sep + strs[i]
-	}
-	return result
-}
-
 // Episode represents a TV episode with season/episode info
 type Episode struct {
 	RatingKey   string `json:"ratingKey"`
@@ -1405,8 +1345,7 @@ func (c *Client) GetShowEpisodes(ctx context.Context, showRatingKey string) ([]E
 
 		req.Header.Set("Accept", "application/json")
 
-		httpClient := &http.Client{Timeout: c.timeout}
-		resp, err := httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to make request: %w", err)
 		}
@@ -1500,8 +1439,7 @@ func (c *Client) GetMoviesByDirector(ctx context.Context, sectionID string, dire
 
 		req.Header.Set("Accept", "application/json")
 
-		httpClient := &http.Client{Timeout: c.timeout}
-		resp, err := httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to make request: %w", err)
 		}
@@ -1588,8 +1526,7 @@ func (c *Client) GetDirectors(ctx context.Context, sectionID string) ([]Director
 
 		req.Header.Set("Accept", "application/json")
 
-		httpClient := &http.Client{Timeout: c.timeout}
-		resp, err := httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to make request: %w", err)
 		}

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"sort"
@@ -9,10 +8,8 @@ import (
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/auth"
 	"github.com/user/plexcli/internal/config"
 	"github.com/user/plexcli/internal/outfmt"
-	"github.com/user/plexcli/internal/plexclient"
 	"github.com/user/plexcli/internal/ui"
 )
 
@@ -31,41 +28,22 @@ type UnwatchedItem struct {
 }
 
 func (c *UnwatchedCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
-
-	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
-	defer cancel()
-
-	token, err := auth.GetToken(authCtx, *cfg)
+	cc, err := NewClientContext(cfg)
 	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
+		return err
 	}
-
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if cfg.Timeout == 0 {
-		timeout = plexclient.DefaultTimeout
-	}
-
-	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
-	if err != nil {
-		return fmt.Errorf("failed to create plex client: %w", err)
-	}
-
-	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	defer cc.Cancel()
 
 	var items []*components.Metadata
 	if c.Section != "" {
-		items, err = client.GetAllLibraryItems(fetchCtx, c.Section)
+		items, err = cc.Client.GetAllLibraryItems(cc.Ctx, c.Section)
 	} else {
-		sections, err := client.GetSections(fetchCtx)
+		sections, err := cc.Client.GetSections(cc.Ctx)
 		if err != nil {
 			return fmt.Errorf("failed to get sections: %w", err)
 		}
 		for _, section := range sections {
-			sectionItems, err := client.GetAllLibraryItems(fetchCtx, section.ID)
+			sectionItems, err := cc.Client.GetAllLibraryItems(cc.Ctx, section.ID)
 			if err != nil {
 				return fmt.Errorf("failed to get items from section %s: %w", section.ID, err)
 			}

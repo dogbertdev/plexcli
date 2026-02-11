@@ -7,11 +7,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/auth"
 	"github.com/user/plexcli/internal/config"
 	"github.com/user/plexcli/internal/outfmt"
 	"github.com/user/plexcli/internal/plexclient"
@@ -32,32 +30,13 @@ type EpisodeGap struct {
 }
 
 func (c *EpisodesMissingCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
-
-	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
-	defer cancel()
-
-	token, err := auth.GetToken(authCtx, *cfg)
+	cc, err := NewClientContext(cfg)
 	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
+		return err
 	}
+	defer cc.Cancel()
 
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if cfg.Timeout == 0 {
-		timeout = plexclient.DefaultTimeout
-	}
-
-	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
-	if err != nil {
-		return fmt.Errorf("failed to create plex client: %w", err)
-	}
-
-	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	episodes, err := c.fetchEpisodes(fetchCtx, client)
+	episodes, err := c.fetchEpisodes(cc.Ctx, cc.Client)
 	if err != nil {
 		return err
 	}
@@ -205,7 +184,7 @@ func episodesGetShowTitle(ep *components.Metadata) string {
 	if ep.Title != "" {
 		return ep.Title
 	}
-	return plexclient.DefaultUnknownTitle
+	return "Unknown"
 }
 
 func formatEpisodeList(episodes []int) string {
@@ -237,18 +216,5 @@ func formatEpisodeList(episodes []int) string {
 		parts = append(parts, fmt.Sprintf("E%02d-E%02d", start, end))
 	}
 
-	return joinStrings(parts, ", ")
-}
-
-func joinStrings(parts []string, separator string) string {
-	if len(parts) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString(parts[0])
-	for i := 1; i < len(parts); i++ {
-		b.WriteString(separator)
-		b.WriteString(parts[i])
-	}
-	return b.String()
+	return strings.Join(parts, ", ")
 }

@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/auth"
 	"github.com/user/plexcli/internal/config"
 	"github.com/user/plexcli/internal/outfmt"
 	"github.com/user/plexcli/internal/plexclient"
@@ -33,42 +31,23 @@ type SubtitleInfo struct {
 }
 
 func (c *SubtitlesMissingCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
-
-	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
-	defer cancel()
-
-	token, err := auth.GetToken(authCtx, *cfg)
-	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
-	}
-
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if cfg.Timeout == 0 {
-		timeout = plexclient.DefaultTimeout
-	}
-
-	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
-	if err != nil {
-		return fmt.Errorf("failed to create plex client: %w", err)
-	}
-
 	requestedLangs := parseLangList(c.Lang)
 	if len(requestedLangs) == 0 {
 		return fmt.Errorf("no valid language codes provided")
 	}
 
-	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	cc, err := NewClientContext(cfg)
+	if err != nil {
+		return err
+	}
+	defer cc.Cancel()
 
-	items, err := c.fetchItems(fetchCtx, client)
+	items, err := c.fetchItems(cc.Ctx, cc.Client)
 	if err != nil {
 		return err
 	}
 
-	results := c.checkSubtitles(fetchCtx, items, client, requestedLangs)
+	results := c.checkSubtitles(cc.Ctx, items, cc.Client, requestedLangs)
 
 	if len(results) == 0 {
 		fmt.Fprintln(u.Err(), "No items with missing subtitles found")
@@ -244,5 +223,5 @@ func getTitle(item *components.Metadata) string {
 	if item.Title != "" {
 		return item.Title
 	}
-	return plexclient.DefaultUnknownTitle
+	return "Unknown"
 }

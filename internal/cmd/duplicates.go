@@ -1,20 +1,16 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/auth"
 	"github.com/user/plexcli/internal/config"
 	"github.com/user/plexcli/internal/outfmt"
-	"github.com/user/plexcli/internal/plexclient"
 	"github.com/user/plexcli/internal/ui"
 )
 
@@ -41,48 +37,25 @@ type DuplicateGroup struct {
 
 // Run executes the duplicates command
 func (c *DuplicatesCmd) Run(ctx *kong.Context, ui *ui.UI, cfg *config.Config) error {
-	// Validate config
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
-
-	// Get authentication token
-	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
-	defer cancel()
-
-	token, err := auth.GetToken(authCtx, *cfg)
+	cc, err := NewClientContext(cfg)
 	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
+		return err
 	}
-
-	// Create Plex client
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if cfg.Timeout == 0 {
-		timeout = plexclient.DefaultTimeout
-	}
-
-	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
-	if err != nil {
-		return fmt.Errorf("failed to create plex client: %w", err)
-	}
-
-	// Fetch library items
-	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	defer cc.Cancel()
 
 	var items []*components.Metadata
 	if c.SectionID != "" {
-		items, err = client.GetAllLibraryItems(fetchCtx, c.SectionID)
+		items, err = cc.Client.GetAllLibraryItems(cc.Ctx, c.SectionID)
 		if err != nil {
 			return fmt.Errorf("failed to fetch library items: %w", err)
 		}
 	} else {
-		sections, err := client.GetSections(fetchCtx)
+		sections, err := cc.Client.GetSections(cc.Ctx)
 		if err != nil {
 			return fmt.Errorf("failed to get sections: %w", err)
 		}
 		for _, section := range sections {
-			sectionItems, err := client.GetAllLibraryItems(fetchCtx, section.ID)
+			sectionItems, err := cc.Client.GetAllLibraryItems(cc.Ctx, section.ID)
 			if err != nil {
 				return fmt.Errorf("failed to get items from section %s: %w", section.ID, err)
 			}
@@ -90,10 +63,8 @@ func (c *DuplicatesCmd) Run(ctx *kong.Context, ui *ui.UI, cfg *config.Config) er
 		}
 	}
 
-	// Find duplicates
 	duplicates := c.findDuplicates(items)
 
-	// Filter by minimum count
 	var filtered []DuplicateGroup
 	for _, d := range duplicates {
 		if d.Count >= c.MinCount {
@@ -101,7 +72,6 @@ func (c *DuplicatesCmd) Run(ctx *kong.Context, ui *ui.UI, cfg *config.Config) er
 		}
 	}
 
-	// Sort by count (descending), then by title
 	sort.Slice(filtered, func(i, j int) bool {
 		if filtered[i].Count != filtered[j].Count {
 			return filtered[i].Count > filtered[j].Count
@@ -109,7 +79,6 @@ func (c *DuplicatesCmd) Run(ctx *kong.Context, ui *ui.UI, cfg *config.Config) er
 		return filtered[i].Title < filtered[j].Title
 	})
 
-	// Output results
 	return c.outputResults(ui.Out(), filtered)
 }
 

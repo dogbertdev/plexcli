@@ -1,20 +1,16 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/auth"
 	"github.com/user/plexcli/internal/config"
 	"github.com/user/plexcli/internal/outfmt"
-	"github.com/user/plexcli/internal/plexclient"
 	"github.com/user/plexcli/internal/ui"
 )
 
@@ -35,57 +31,32 @@ type EpisodeListItem struct {
 }
 
 func (c *EpisodesListCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
-
-	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
-	defer cancel()
-
-	token, err := auth.GetToken(authCtx, *cfg)
+	cc, err := NewClientContext(cfg)
 	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
+		return err
 	}
+	defer cc.Cancel()
 
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if cfg.Timeout == 0 {
-		timeout = plexclient.DefaultTimeout
-	}
-
-	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
-	if err != nil {
-		return fmt.Errorf("failed to create plex client: %w", err)
-	}
-
-	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	// Find the show
-	showRatingKey, showTitle, err := client.FindShow(fetchCtx, c.Show)
+	showRatingKey, showTitle, err := cc.Client.FindShow(cc.Ctx, c.Show)
 	if err != nil {
 		return fmt.Errorf("failed to find show: %w", err)
 	}
 
-	// Get all episodes
-	episodes, err := client.GetShowEpisodes(fetchCtx, showRatingKey)
+	episodes, err := cc.Client.GetShowEpisodes(cc.Ctx, showRatingKey)
 	if err != nil {
 		return fmt.Errorf("failed to get episodes: %w", err)
 	}
 
-	// Parse filter if provided
 	var filterSet map[string]bool
 	if c.Filter != "" {
 		filterSet = parseEpisodeFilterPatterns(c.Filter)
 	}
 
-	// Convert to output items and apply filter
 	var outputItems []EpisodeListItem
 	for _, ep := range episodes {
 		seasonEp := fmt.Sprintf("S%dE%d", ep.SeasonNum, ep.EpisodeNum)
 
-		// Apply filter if set
 		if filterSet != nil {
-			// Check both with and without leading zeros
 			key1 := fmt.Sprintf("S%dE%d", ep.SeasonNum, ep.EpisodeNum)
 			key2 := fmt.Sprintf("S%02dE%02d", ep.SeasonNum, ep.EpisodeNum)
 			if !filterSet[key1] && !filterSet[key2] {
@@ -103,7 +74,6 @@ func (c *EpisodesListCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) e
 		})
 	}
 
-	// Sort by season, then episode
 	sort.Slice(outputItems, func(i, j int) bool {
 		if outputItems[i].Season != outputItems[j].Season {
 			return outputItems[i].Season < outputItems[j].Season
@@ -120,7 +90,6 @@ func (c *EpisodesListCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) e
 		return nil
 	}
 
-	// Keys-only output for piping
 	if c.KeysOnly {
 		keys := make([]string, len(outputItems))
 		for i, item := range outputItems {

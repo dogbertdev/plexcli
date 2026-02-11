@@ -1,13 +1,10 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/auth"
 	"github.com/user/plexcli/internal/config"
 	"github.com/user/plexcli/internal/outfmt"
 	"github.com/user/plexcli/internal/plexclient"
@@ -33,44 +30,24 @@ type SearchItem struct {
 }
 
 func (c *SearchCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
-
-	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
-	defer cancel()
-
-	token, err := auth.GetToken(authCtx, *cfg)
+	cc, err := NewClientContext(cfg)
 	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
+		return err
 	}
-
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if cfg.Timeout == 0 {
-		timeout = plexclient.DefaultTimeout
-	}
-
-	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
-	if err != nil {
-		return fmt.Errorf("failed to create plex client: %w", err)
-	}
-
-	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	defer cc.Cancel()
 
 	var sectionID *string
 	if c.Section != "" {
 		sectionID = &c.Section
 	}
 
-	results, err := client.SearchLibrary(fetchCtx, c.Query, sectionID, c.Limit)
+	results, err := cc.Client.SearchLibrary(cc.Ctx, c.Query, sectionID, c.Limit)
 	if err != nil {
 		return fmt.Errorf("search failed: %w", err)
 	}
 
-	// Filter by type if specified
 	if c.Type != "all" {
-		filtered := make([]plexclient.SearchResult, 0)
+		filtered := make([]plexclient.SearchResult, 0, len(results))
 		for _, r := range results {
 			if r.Type == c.Type {
 				filtered = append(filtered, r)
@@ -84,7 +61,6 @@ func (c *SearchCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
 		return nil
 	}
 
-	// Apply limit
 	if len(results) > c.Limit {
 		results = results[:c.Limit]
 	}
