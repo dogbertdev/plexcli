@@ -18,8 +18,10 @@ import (
 type PlaylistCmd struct {
 	List   PlaylistListCmd   `cmd:"" help:"List all playlists"`
 	Create PlaylistCreateCmd `cmd:"" help:"Create a new playlist"`
+	Smart  PlaylistSmartCmd  `cmd:"" help:"Create a smart playlist (auto-updates)"`
 	Add    PlaylistAddCmd    `cmd:"" help:"Add items to a playlist"`
 	Show   PlaylistShowCmd   `cmd:"" help:"Show items in a playlist"`
+	Delete PlaylistDeleteCmd `cmd:"" help:"Delete a playlist"`
 }
 
 // PlaylistListCmd lists all playlists
@@ -175,6 +177,80 @@ func (c *PlaylistCreateCmd) output(w io.Writer, result PlaylistCreateResult) err
 	header := []string{"RATING KEY", "TITLE", "ITEMS"}
 	rows := [][]string{
 		{result.RatingKey, result.Title, fmt.Sprintf("%d", result.ItemCount)},
+	}
+
+	return formatter.Format(w, header, rows, []PlaylistCreateResult{result})
+}
+
+// PlaylistSmartCmd creates a smart playlist
+type PlaylistSmartCmd struct {
+	Name     string `arg:"" help:"Playlist name"`
+	Section  string `help:"Library section ID" short:"s" required:""`
+	Director string `help:"Filter by director name" short:"d"`
+	Type     string `help:"Playlist type: video, audio" default:"video" enum:"video,audio"`
+	Output   string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+}
+
+func (c *PlaylistSmartCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("configuration error: %w", err)
+	}
+
+	if c.Director == "" {
+		return fmt.Errorf("at least one filter is required (e.g., --director)")
+	}
+
+	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
+	defer cancel()
+
+	token, err := auth.GetToken(authCtx, *cfg)
+	if err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+
+	timeout := time.Duration(cfg.Timeout) * time.Second
+	if cfg.Timeout == 0 {
+		timeout = plexclient.DefaultTimeout
+	}
+
+	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
+	if err != nil {
+		return fmt.Errorf("failed to create plex client: %w", err)
+	}
+
+	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	// Look up director ID
+	directorID, err := client.GetDirectorID(fetchCtx, c.Section, c.Director)
+	if err != nil {
+		return fmt.Errorf("failed to find director: %w", err)
+	}
+
+	playlist, err := client.CreateSmartPlaylist(fetchCtx, c.Name, c.Type, c.Section, "director", directorID)
+	if err != nil {
+		return fmt.Errorf("failed to create smart playlist: %w", err)
+	}
+
+	if playlist == nil {
+		return fmt.Errorf("playlist creation returned no result")
+	}
+
+	result := PlaylistCreateResult{
+		RatingKey: playlist.RatingKey,
+		Title:     playlist.Title,
+		ItemCount: playlist.LeafCount,
+	}
+
+	return c.output(u.Out(), result)
+}
+
+func (c *PlaylistSmartCmd) output(w io.Writer, result PlaylistCreateResult) error {
+	formatter := outfmt.NewFormatter(outfmt.Format(c.Output))
+
+	header := []string{"RATING KEY", "TITLE", "ITEMS", "TYPE"}
+	rows := [][]string{
+		{result.RatingKey, result.Title, fmt.Sprintf("%d", result.ItemCount), "smart"},
 	}
 
 	return formatter.Format(w, header, rows, []PlaylistCreateResult{result})
@@ -356,4 +432,65 @@ func (c *PlaylistShowCmd) output(w io.Writer, items []PlaylistShowItem) error {
 	}
 
 	return formatter.Format(w, header, rows, items)
+}
+
+// PlaylistDeleteCmd deletes a playlist
+type PlaylistDeleteCmd struct {
+	Playlist string `arg:"" help:"Playlist ID (rating key)"`
+	Output   string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+}
+
+type PlaylistDeleteResult struct {
+	PlaylistID string `json:"playlist_id"`
+	Message    string `json:"message"`
+}
+
+func (c *PlaylistDeleteCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("configuration error: %w", err)
+	}
+
+	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
+	defer cancel()
+
+	token, err := auth.GetToken(authCtx, *cfg)
+	if err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+
+	timeout := time.Duration(cfg.Timeout) * time.Second
+	if cfg.Timeout == 0 {
+		timeout = plexclient.DefaultTimeout
+	}
+
+	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
+	if err != nil {
+		return fmt.Errorf("failed to create plex client: %w", err)
+	}
+
+	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	err = client.DeletePlaylist(fetchCtx, c.Playlist)
+	if err != nil {
+		return fmt.Errorf("failed to delete playlist: %w", err)
+	}
+
+	result := PlaylistDeleteResult{
+		PlaylistID: c.Playlist,
+		Message:    fmt.Sprintf("Deleted playlist %s", c.Playlist),
+	}
+
+	return c.output(u.Out(), result)
+}
+
+func (c *PlaylistDeleteCmd) output(w io.Writer, result PlaylistDeleteResult) error {
+	formatter := outfmt.NewFormatter(outfmt.Format(c.Output))
+
+	header := []string{"PLAYLIST ID", "MESSAGE"}
+	rows := [][]string{
+		{result.PlaylistID, result.Message},
+	}
+
+	return formatter.Format(w, header, rows, []PlaylistDeleteResult{result})
 }

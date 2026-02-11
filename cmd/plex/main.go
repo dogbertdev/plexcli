@@ -41,6 +41,8 @@ type CLI struct {
 	Search       cmd.SearchCmd           `cmd:"" help:"Search the Plex library"`
 	Playlist     cmd.PlaylistCmd         `cmd:"" help:"Manage playlists"`
 	Episodes     cmd.EpisodesListCmd     `cmd:"" help:"List episodes for a show with optional filtering"`
+	Movies       cmd.MoviesCmd           `cmd:"" help:"List movies with optional filtering (e.g., by director)"`
+	Directors    cmd.DirectorsCmd        `cmd:"" help:"List all directors in a library"`
 }
 
 func main() {
@@ -131,9 +133,13 @@ func applyOutputFormat(cli *CLI, format string) {
 	cli.Search.Output = format
 	cli.Playlist.List.Output = format
 	cli.Playlist.Create.Output = format
+	cli.Playlist.Smart.Output = format
 	cli.Playlist.Add.Output = format
 	cli.Playlist.Show.Output = format
+	cli.Playlist.Delete.Output = format
 	cli.Episodes.Output = format
+	cli.Movies.Output = format
+	cli.Directors.Output = format
 }
 
 // loadConfig loads configuration from file and/or environment/cli flags

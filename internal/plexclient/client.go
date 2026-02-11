@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -196,7 +197,10 @@ type rawMediaMetadata struct {
 	ViewCount        *int    `json:"viewCount"`
 	GrandparentTitle *string `json:"grandparentTitle"`
 	EditionTitle     *string `json:"editionTitle"`
-	Media            []struct {
+	Director         []struct {
+		Tag string `json:"tag"`
+	} `json:"Director"`
+	Media []struct {
 		Part []struct {
 			File   *string `json:"file"`
 			Size   *int64  `json:"size"`
@@ -1019,6 +1023,131 @@ func (c *Client) CreatePlaylist(ctx context.Context, title string, playlistType 
 	return playlist, nil
 }
 
+// CreateSmartPlaylist creates a smart playlist based on a filter (e.g., by director)
+// sectionID is the library section, filterType is the filter category (e.g., "director"),
+// filterValue is the filter ID (e.g., director ID from GetDirectors)
+func (c *Client) CreateSmartPlaylist(ctx context.Context, title string, playlistType string, sectionID string, filterType string, filterValue string) (*PlaylistInfo, error) {
+	if title == "" {
+		return nil, &PlexError{
+			Op:  "CreateSmartPlaylist",
+			Err: fmt.Errorf("title is required"),
+		}
+	}
+
+	if sectionID == "" {
+		return nil, &PlexError{
+			Op:  "CreateSmartPlaylist",
+			Err: fmt.Errorf("section ID is required"),
+		}
+	}
+
+	if filterType == "" || filterValue == "" {
+		return nil, &PlexError{
+			Op:  "CreateSmartPlaylist",
+			Err: fmt.Errorf("filter type and value are required"),
+		}
+	}
+
+	if playlistType == "" {
+		playlistType = "video"
+	}
+
+	var playlist *PlaylistInfo
+
+	err := c.executeWithRetry(ctx, "CreateSmartPlaylist", func() error {
+		// Smart playlist URI format (from working example):
+		// library://x/directory/%2Flibrary%2Fsections%2F1%2Fall%3Ftype%3D1%26sort%3DtitleSort%26director%3D2690
+		// Which decodes to: library://x/directory//library/sections/1/all?type=1&sort=titleSort&director=2690
+		mediaType := "1" // movies by default
+		if playlistType == "audio" {
+			mediaType = "10" // tracks
+		}
+
+		filterPath := fmt.Sprintf("/library/sections/%s/all?type=%s&sort=titleSort&%s=%s",
+			sectionID, mediaType, filterType, filterValue)
+
+		// URI format: library://x/directory/{url_encoded_path}
+		uri := fmt.Sprintf("library://x/directory/%s", url.QueryEscape(filterPath))
+
+		urlStr := fmt.Sprintf("%s/playlists?title=%s&type=%s&smart=1&uri=%s&X-Plex-Token=%s",
+			c.serverURL, url.QueryEscape(title), playlistType, url.QueryEscape(uri), c.token)
+
+		req, err := http.NewRequestWithContext(ctx, "POST", urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Accept", "application/json")
+
+		httpClient := &http.Client{Timeout: c.timeout}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		var rawResp rawPlaylistsResponse
+		if err := json.Unmarshal(body, &rawResp); err != nil {
+			return fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+
+		if len(rawResp.MediaContainer.Metadata) > 0 {
+			p := rawResp.MediaContainer.Metadata[0]
+			playlist = &PlaylistInfo{
+				RatingKey:    p.RatingKey,
+				Key:          p.Key,
+				Title:        p.Title,
+				Type:         p.Type,
+				PlaylistType: p.PlaylistType,
+				LeafCount:    p.LeafCount,
+				Smart:        p.Smart,
+				Duration:     p.Duration,
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, &PlexError{
+			Op:  "CreateSmartPlaylist",
+			Err: err,
+		}
+	}
+
+	return playlist, nil
+}
+
+// GetDirectorID looks up a director by name and returns their ID
+func (c *Client) GetDirectorID(ctx context.Context, sectionID string, directorName string) (string, error) {
+	directors, err := c.GetDirectors(ctx, sectionID)
+	if err != nil {
+		return "", err
+	}
+
+	directorLower := strings.ToLower(directorName)
+	for _, d := range directors {
+		if strings.Contains(strings.ToLower(d.Name), directorLower) {
+			return d.ID, nil
+		}
+	}
+
+	return "", &PlexError{
+		Op:  "GetDirectorID",
+		Err: fmt.Errorf("director not found: %s", directorName),
+	}
+}
+
 // AddToPlaylist adds items to an existing playlist
 func (c *Client) AddToPlaylist(ctx context.Context, playlistID string, ratingKeys []string) error {
 	if playlistID == "" {
@@ -1077,6 +1206,49 @@ func (c *Client) AddToPlaylist(ctx context.Context, playlistID string, ratingKey
 	if err != nil {
 		return &PlexError{
 			Op:  "AddToPlaylist",
+			Err: err,
+		}
+	}
+
+	return nil
+}
+
+// DeletePlaylist deletes a playlist by ID
+func (c *Client) DeletePlaylist(ctx context.Context, playlistID string) error {
+	if playlistID == "" {
+		return &PlexError{
+			Op:  "DeletePlaylist",
+			Err: fmt.Errorf("playlist ID is required"),
+		}
+	}
+
+	err := c.executeWithRetry(ctx, "DeletePlaylist", func() error {
+		urlStr := fmt.Sprintf("%s/playlists/%s?X-Plex-Token=%s",
+			c.serverURL, playlistID, c.token)
+
+		req, err := http.NewRequestWithContext(ctx, "DELETE", urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		httpClient := &http.Client{Timeout: c.timeout}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return &PlexError{
+			Op:  "DeletePlaylist",
 			Err: err,
 		}
 	}
@@ -1288,4 +1460,179 @@ func (c *Client) GetShowEpisodes(ctx context.Context, showRatingKey string) ([]E
 	}
 
 	return episodes, nil
+}
+
+// MovieInfo represents a movie with director info
+type MovieInfo struct {
+	RatingKey string   `json:"ratingKey"`
+	Title     string   `json:"title"`
+	Year      int      `json:"year"`
+	Directors []string `json:"directors"`
+}
+
+// GetMoviesByDirector returns all movies by a given director from a library section
+// The director name matching is case-insensitive and supports partial matches
+func (c *Client) GetMoviesByDirector(ctx context.Context, sectionID string, directorName string) ([]MovieInfo, error) {
+	if sectionID == "" {
+		return nil, &PlexError{
+			Op:  "GetMoviesByDirector",
+			Err: fmt.Errorf("section ID is required"),
+		}
+	}
+	if directorName == "" {
+		return nil, &PlexError{
+			Op:  "GetMoviesByDirector",
+			Err: fmt.Errorf("director name is required"),
+		}
+	}
+
+	var movies []MovieInfo
+
+	err := c.executeWithRetry(ctx, "GetMoviesByDirector", func() error {
+		// Use the director filter endpoint
+		urlStr := fmt.Sprintf("%s/library/sections/%s/all?type=1&X-Plex-Container-Start=0&X-Plex-Container-Size=1000&X-Plex-Token=%s",
+			c.serverURL, sectionID, c.token)
+
+		req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Accept", "application/json")
+
+		httpClient := &http.Client{Timeout: c.timeout}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		var rawResp rawLibraryItemsResponse
+		if err := json.Unmarshal(body, &rawResp); err != nil {
+			return fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+
+		// Filter by director name (case-insensitive, partial match)
+		directorLower := strings.ToLower(directorName)
+		for _, item := range rawResp.MediaContainer.Metadata {
+			for _, d := range item.Director {
+				if strings.Contains(strings.ToLower(d.Tag), directorLower) {
+					year := 0
+					if item.Year != nil {
+						year = *item.Year
+					}
+					directors := make([]string, len(item.Director))
+					for i, dir := range item.Director {
+						directors[i] = dir.Tag
+					}
+					movies = append(movies, MovieInfo{
+						RatingKey: item.RatingKey,
+						Title:     item.Title,
+						Year:      year,
+						Directors: directors,
+					})
+					break // Don't add the same movie twice
+				}
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, &PlexError{
+			Op:      "GetMoviesByDirector",
+			Section: sectionID,
+			Err:     err,
+		}
+	}
+
+	return movies, nil
+}
+
+// DirectorInfo represents a director in the library
+type DirectorInfo struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Count int    `json:"count"` // Number of movies by this director
+}
+
+// GetDirectors returns all directors in a library section
+func (c *Client) GetDirectors(ctx context.Context, sectionID string) ([]DirectorInfo, error) {
+	if sectionID == "" {
+		return nil, &PlexError{
+			Op:  "GetDirectors",
+			Err: fmt.Errorf("section ID is required"),
+		}
+	}
+
+	var directors []DirectorInfo
+
+	err := c.executeWithRetry(ctx, "GetDirectors", func() error {
+		urlStr := fmt.Sprintf("%s/library/sections/%s/director?X-Plex-Token=%s",
+			c.serverURL, sectionID, c.token)
+
+		req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Accept", "application/json")
+
+		httpClient := &http.Client{Timeout: c.timeout}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		var rawResp struct {
+			MediaContainer struct {
+				Directory []struct {
+					Key   string `json:"key"`
+					Title string `json:"title"`
+				} `json:"Directory"`
+			} `json:"MediaContainer"`
+		}
+		if err := json.Unmarshal(body, &rawResp); err != nil {
+			return fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+
+		for _, d := range rawResp.MediaContainer.Directory {
+			directors = append(directors, DirectorInfo{
+				ID:   d.Key,
+				Name: d.Title,
+			})
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, &PlexError{
+			Op:      "GetDirectors",
+			Section: sectionID,
+			Err:     err,
+		}
+	}
+
+	return directors, nil
 }
