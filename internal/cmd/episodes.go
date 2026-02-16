@@ -10,10 +10,10 @@ import (
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/config"
-	"github.com/user/plexcli/internal/outfmt"
-	"github.com/user/plexcli/internal/plexclient"
-	"github.com/user/plexcli/internal/ui"
+	"github.com/dogbertdev/plexcli/internal/config"
+	"github.com/dogbertdev/plexcli/internal/outfmt"
+	"github.com/dogbertdev/plexcli/internal/plexclient"
+	"github.com/dogbertdev/plexcli/internal/ui"
 )
 
 type EpisodesMissingCmd struct {
@@ -85,7 +85,7 @@ func (c *EpisodesMissingCmd) findMissingEpisodes(episodes []*components.Metadata
 	showSeasonEpisodes := make(map[showSeasonKey][]int)
 
 	for _, ep := range episodes {
-		if string(ep.Type) != "episode" {
+		if anyToString(ep.Type) != "episode" {
 			continue
 		}
 
@@ -96,7 +96,7 @@ func (c *EpisodesMissingCmd) findMissingEpisodes(episodes []*components.Metadata
 
 		season := 0
 		if ep.ParentIndex != nil {
-			season = *ep.ParentIndex
+			season = int(*ep.ParentIndex)
 		}
 
 		if c.Season > 0 && season != c.Season {
@@ -105,7 +105,7 @@ func (c *EpisodesMissingCmd) findMissingEpisodes(episodes []*components.Metadata
 
 		episodeNum := 0
 		if ep.Index != nil {
-			episodeNum = *ep.Index
+			episodeNum = int(*ep.Index)
 		}
 
 		if episodeNum > 0 {
@@ -181,10 +181,7 @@ func episodesGetShowTitle(ep *components.Metadata) string {
 	if ep.ParentTitle != nil && *ep.ParentTitle != "" {
 		return *ep.ParentTitle
 	}
-	if ep.Title != "" {
-		return ep.Title
-	}
-	return "Unknown"
+	return anyToString(ep.Title)
 }
 
 func formatEpisodeList(episodes []int) string {

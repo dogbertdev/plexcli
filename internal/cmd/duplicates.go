@@ -9,9 +9,9 @@ import (
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/config"
-	"github.com/user/plexcli/internal/outfmt"
-	"github.com/user/plexcli/internal/ui"
+	"github.com/dogbertdev/plexcli/internal/config"
+	"github.com/dogbertdev/plexcli/internal/outfmt"
+	"github.com/dogbertdev/plexcli/internal/ui"
 )
 
 // DuplicatesCmd represents the duplicates command
@@ -92,7 +92,7 @@ func (c *DuplicatesCmd) findDuplicates(items []*components.Metadata) []Duplicate
 		}
 
 		// Filter by type
-		itemType := item.GetType()
+		itemType := anyToString(item.GetType())
 		if c.Type != "all" && itemType != c.Type {
 			continue
 		}
@@ -108,14 +108,14 @@ func (c *DuplicatesCmd) findDuplicates(items []*components.Metadata) []Duplicate
 		if !exists {
 			group = &DuplicateGroup{
 				Key:        key,
-				Title:      item.GetTitle(),
+				Title:      anyToString(item.GetTitle()),
 				Type:       itemType,
 				RatingKeys: []string{},
 			}
 
 			// Add year for movies
 			if year := item.GetYear(); year != nil {
-				group.Year = *year
+				group.Year = int(*year)
 			}
 
 			// Add show for episodes
@@ -133,8 +133,9 @@ func (c *DuplicatesCmd) findDuplicates(items []*components.Metadata) []Duplicate
 		}
 
 		// Add rating key to group
-		if ratingKey := item.GetRatingKey(); ratingKey != nil {
-			group.RatingKeys = append(group.RatingKeys, *ratingKey)
+		ratingKey := anyToString(item.GetRatingKey())
+		if ratingKey != "" {
+			group.RatingKeys = append(group.RatingKeys, ratingKey)
 			group.Count = len(group.RatingKeys)
 		}
 	}
@@ -155,19 +156,19 @@ func (c *DuplicatesCmd) generateKey(item *components.Metadata) string {
 		return ""
 	}
 
-	title := item.GetTitle()
+	title := anyToString(item.GetTitle())
 	if title == "" {
 		return ""
 	}
 
-	itemType := item.GetType()
+	itemType := anyToString(item.GetType())
 
 	switch itemType {
 	case "movie":
 		// Group by title + year
 		year := 0
 		if y := item.GetYear(); y != nil {
-			year = *y
+			year = int(*y)
 		}
 
 		// When EditionsAreDuplicates is false (default), include edition in key

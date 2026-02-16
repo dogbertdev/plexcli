@@ -9,10 +9,10 @@ import (
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/config"
-	"github.com/user/plexcli/internal/outfmt"
-	"github.com/user/plexcli/internal/plexclient"
-	"github.com/user/plexcli/internal/ui"
+	"github.com/dogbertdev/plexcli/internal/config"
+	"github.com/dogbertdev/plexcli/internal/outfmt"
+	"github.com/dogbertdev/plexcli/internal/plexclient"
+	"github.com/dogbertdev/plexcli/internal/ui"
 )
 
 type AudioCheckCmd struct {
@@ -87,7 +87,8 @@ func (c *AudioCheckCmd) checkAudio(items []*components.Metadata, requestedCodecs
 	var results []AudioInfo
 
 	for _, item := range items {
-		if c.Type != "all" && string(item.Type) != c.Type {
+		itemType := anyToString(item.Type)
+		if c.Type != "all" && itemType != c.Type {
 			continue
 		}
 
@@ -105,10 +106,7 @@ func (c *AudioCheckCmd) checkAudio(items []*components.Metadata, requestedCodecs
 func (c *AudioCheckCmd) extractAudioInfo(item *components.Metadata) []AudioInfo {
 	var infos []AudioInfo
 	title := audioGetTitle(item)
-	year := 0
-	if item.Year != nil {
-		year = *item.Year
-	}
+	year := int64PtrToInt(item.Year)
 
 	if item.Media != nil {
 		for _, media := range item.Media {
@@ -116,16 +114,17 @@ func (c *AudioCheckCmd) extractAudioInfo(item *components.Metadata) []AudioInfo 
 				for _, part := range media.Part {
 					if part.Stream != nil {
 						for _, stream := range part.Stream {
-							if stream.StreamType == 2 {
+							// StreamType 2 = audio
+							if stream.StreamType != nil && *stream.StreamType == 2 {
 								info := AudioInfo{
 									Title: title,
 									Year:  year,
-									Type:  string(item.Type),
+									Type:  anyToString(item.Type),
 								}
 
-								info.Codec = stream.Codec
-								if stream.Channels != nil {
-									info.Channels = *stream.Channels
+								info.Codec = anyToString(stream.Codec)
+								if media.AudioChannels != nil {
+									info.Channels = int(*media.AudioChannels)
 								}
 
 								infos = append(infos, info)
@@ -200,8 +199,5 @@ func parseCodecList(codecStr string) []string {
 }
 
 func audioGetTitle(item *components.Metadata) string {
-	if item.Title != "" {
-		return item.Title
-	}
-	return "Unknown"
+	return anyToString(item.Title)
 }

@@ -308,9 +308,9 @@ func convertRawToMetadata(raw rawMediaMetadata) *components.Metadata {
 		Key:              key,
 		Title:            raw.Title,
 		Type:             raw.Type,
-		AddedAt:          raw.AddedAt,
-		Year:             raw.Year,
-		ViewCount:        raw.ViewCount,
+		AddedAt:          int64Ptr(raw.AddedAt),
+		Year:             intToInt64Ptr(raw.Year),
+		ViewCount:        intToInt64Ptr(raw.ViewCount),
 		Summary:          raw.Summary,
 		Thumb:            raw.Thumb,
 		GrandparentTitle: raw.GrandparentTitle,
@@ -329,7 +329,7 @@ func convertRawToMetadata(raw rawMediaMetadata) *components.Metadata {
 				VideoResolution: m.VideoResolution,
 				VideoCodec:      m.VideoCodec,
 				AudioCodec:      m.AudioCodec,
-				AudioChannels:   m.AudioChannels,
+				AudioChannels:   intToInt64Ptr(m.AudioChannels),
 			}
 			if len(m.Part) > 0 {
 				parts := make([]components.Part, len(m.Part))
@@ -341,16 +341,12 @@ func convertRawToMetadata(raw rawMediaMetadata) *components.Metadata {
 					if len(p.Stream) > 0 {
 						streams := make([]components.Stream, len(p.Stream))
 						for k, s := range p.Stream {
-							codec := ""
-							if s.Codec != nil {
-								codec = *s.Codec
-							}
+							streamType := int64(s.StreamType)
 							streams[k] = components.Stream{
-								StreamType:   components.StreamType(s.StreamType),
+								StreamType:   &streamType,
 								Language:     s.Language,
 								LanguageCode: s.LanguageCode,
-								Codec:        codec,
-								Channels:     s.Channels,
+								Codec:        s.Codec,
 							}
 						}
 						parts[j].Stream = streams
@@ -363,6 +359,18 @@ func convertRawToMetadata(raw rawMediaMetadata) *components.Metadata {
 	}
 
 	return meta
+}
+
+func int64Ptr(v int64) *int64 {
+	return &v
+}
+
+func intToInt64Ptr(v *int) *int64 {
+	if v == nil {
+		return nil
+	}
+	val := int64(*v)
+	return &val
 }
 
 func (c *Client) GetLibraryItemsConcurrent(ctx context.Context, sectionIDs []string, maxConcurrent int) ([]*components.Metadata, error) {

@@ -2,13 +2,14 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
-	"github.com/LukeHagar/plexgo"
-	"github.com/LukeHagar/plexgo/models/components"
-	"github.com/LukeHagar/plexgo/models/operations"
-	"github.com/user/plexcli/internal/config"
+	"github.com/dogbertdev/plexcli/internal/config"
 )
 
 const (
@@ -34,6 +35,12 @@ type AuthMethod interface {
 	Name() string
 }
 
+type userResponse struct {
+	AuthToken string `json:"authToken"`
+	Username  string `json:"username"`
+	Email     string `json:"email"`
+}
+
 type TokenAuth struct {
 	token string
 }
@@ -51,27 +58,27 @@ func (t *TokenAuth) Authenticate(ctx context.Context) (string, error) {
 		return "", ErrNoCredentials
 	}
 
-	sdk := plexgo.New(
-		plexgo.WithServerURL(PlexTVURL),
-		plexgo.WithSecurity(t.token),
-		plexgo.WithClientIdentifier(DefaultClientID),
-		plexgo.WithProduct(DefaultProduct),
-		plexgo.WithVersion(DefaultVersion),
-		plexgo.WithPlatform(DefaultPlatform),
-	)
-
-	req := operations.GetTokenDetailsRequest{}
-	resp, err := sdk.Authentication.GetTokenDetails(ctx, req)
+	client := &http.Client{Timeout: DefaultTimeout}
+	req, err := http.NewRequestWithContext(ctx, "GET", PlexTVURL+"/user", nil)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrInvalidToken, err)
 	}
 
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Token", t.token)
+	req.Header.Set("X-Plex-Client-Identifier", DefaultClientID)
+	req.Header.Set("X-Plex-Product", DefaultProduct)
+	req.Header.Set("X-Plex-Version", DefaultVersion)
+	req.Header.Set("X-Plex-Platform", DefaultPlatform)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrInvalidToken, err)
+	}
+	defer resp.Body.Close()
+
 	if resp.StatusCode != StatusOK {
 		return "", fmt.Errorf("%w: received status %d", ErrInvalidToken, resp.StatusCode)
-	}
-
-	if resp.UserPlexAccount == nil {
-		return "", fmt.Errorf("%w: no user account in response", ErrInvalidToken)
 	}
 
 	return t.token, nil
@@ -108,45 +115,44 @@ func (p *PasswordAuth) Authenticate(ctx context.Context) (string, error) {
 		return "", ErrNoCredentials
 	}
 
-	sdk := plexgo.New(
-		plexgo.WithServerURL(PlexTVURL),
-		plexgo.WithClientIdentifier(p.clientID),
-		plexgo.WithProduct(DefaultProduct),
-		plexgo.WithVersion(DefaultVersion),
-		plexgo.WithPlatform(DefaultPlatform),
-	)
+	client := &http.Client{Timeout: DefaultTimeout}
 
-	req := operations.PostUsersSignInDataRequest{
-		Accepts:          components.AcceptsApplicationJSON.ToPointer(),
-		ClientIdentifier: &p.clientID,
-		Product:          stringPtr(DefaultProduct),
-		Version:          stringPtr(DefaultVersion),
-		Platform:         stringPtr(DefaultPlatform),
-		RequestBody: &operations.PostUsersSignInDataRequestBody{
-			Login:    p.username,
-			Password: p.password,
-		},
-	}
+	data := url.Values{}
+	data.Set("login", p.username)
+	data.Set("password", p.password)
 
-	resp, err := sdk.Authentication.PostUsersSignInData(ctx, req)
+	req, err := http.NewRequestWithContext(ctx, "POST", PlexTVURL+"/users/signin", strings.NewReader(data.Encode()))
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrInvalidCredentials, err)
 	}
+
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-Plex-Client-Identifier", p.clientID)
+	req.Header.Set("X-Plex-Product", DefaultProduct)
+	req.Header.Set("X-Plex-Version", DefaultVersion)
+	req.Header.Set("X-Plex-Platform", DefaultPlatform)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrInvalidCredentials, err)
+	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != StatusCreated {
 		return "", fmt.Errorf("%w: received status %d", ErrAuthFailed, resp.StatusCode)
 	}
 
-	if resp.UserPlexAccount == nil {
-		return "", fmt.Errorf("%w: no user account in response", ErrAuthFailed)
+	var user userResponse
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return "", fmt.Errorf("%w: failed to decode response: %v", ErrAuthFailed, err)
 	}
 
-	token := resp.UserPlexAccount.GetAuthToken()
-	if token == "" {
+	if user.AuthToken == "" {
 		return "", fmt.Errorf("%w: no auth token in response", ErrAuthFailed)
 	}
 
-	return token, nil
+	return user.AuthToken, nil
 }
 
 type AutoAuth struct {
@@ -213,8 +219,4 @@ func GetTokenAndStore(ctx context.Context, cfg config.Config) (string, error) {
 	}
 
 	return token, nil
-}
-
-func stringPtr(s string) *string {
-	return &s
 }

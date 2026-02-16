@@ -1,5 +1,9 @@
 # Plex CLI
 
+[![CI](https://github.com/dogbertdev/plexcli/actions/workflows/ci.yml/badge.svg)](https://github.com/dogbertdev/plexcli/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/dogbertdev/plexcli)](https://goreportcard.com/report/github.com/dogbertdev/plexcli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A comprehensive command-line interface for managing Plex Media Server libraries using the [plexgo](https://github.com/lukehagar/plexgo) SDK.
 
 ## Features
@@ -15,14 +19,20 @@ A comprehensive command-line interface for managing Plex Media Server libraries 
 ### From Source
 
 ```bash
-git clone https://github.com/user/plexcli.git
+git clone https://github.com/dogbertdev/plexcli.git
 cd plexcli
 make install
 ```
 
+### Using Go Install
+
+```bash
+go install github.com/dogbertdev/plexcli/cmd/plex@latest
+```
+
 ### Pre-built Binaries
 
-Download from the releases page for your platform.
+Download from the [releases page](https://github.com/dogbertdev/plexcli/releases) for your platform.
 
 ## Configuration
 

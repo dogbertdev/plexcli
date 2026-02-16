@@ -1,5 +1,9 @@
 # Binaries
 bin/
+build/
+plex
+plex-cli
+cmd.test
 *.exe
 *.exe~
 *.dll
@@ -21,3 +25,9 @@ vendor/
 
 # Local references
 references/
+
+# Environment
+.env
+
+# Planning docs (internal use only)
+docs/planning/

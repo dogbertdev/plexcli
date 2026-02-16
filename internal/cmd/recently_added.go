@@ -8,10 +8,10 @@ import (
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/config"
-	"github.com/user/plexcli/internal/outfmt"
-	"github.com/user/plexcli/internal/plexclient"
-	"github.com/user/plexcli/internal/ui"
+	"github.com/dogbertdev/plexcli/internal/config"
+	"github.com/dogbertdev/plexcli/internal/outfmt"
+	"github.com/dogbertdev/plexcli/internal/plexclient"
+	"github.com/dogbertdev/plexcli/internal/ui"
 )
 
 type RecentlyAddedCmd struct {
@@ -73,13 +73,14 @@ func (c *RecentlyAddedCmd) processItems(items []*components.Metadata) []Recently
 	var results []RecentlyAddedItem
 
 	for _, item := range items {
-		if c.Type != "all" && string(item.Type) != c.Type {
+		itemType := anyToString(item.Type)
+		if c.Type != "all" && itemType != c.Type {
 			continue
 		}
 
 		addedAt := time.Time{}
-		if item.AddedAt > 0 {
-			addedAt = time.Unix(item.AddedAt, 0)
+		if item.AddedAt != nil && *item.AddedAt > 0 {
+			addedAt = time.Unix(*item.AddedAt, 0)
 		}
 
 		if addedAt.Before(cutoffTime) {
@@ -88,12 +89,12 @@ func (c *RecentlyAddedCmd) processItems(items []*components.Metadata) []Recently
 
 		result := RecentlyAddedItem{
 			Title:   recentlyGetTitle(item),
-			Type:    string(item.Type),
+			Type:    itemType,
 			AddedAt: addedAt,
 		}
 
 		if item.Year != nil {
-			result.Year = *item.Year
+			result.Year = int(*item.Year)
 		}
 
 		results = append(results, result)
@@ -135,8 +136,9 @@ func (c *RecentlyAddedCmd) outputResults(w io.Writer, results []RecentlyAddedIte
 }
 
 func recentlyGetTitle(item *components.Metadata) string {
-	if item.Title != "" {
-		return item.Title
+	title := anyToString(item.Title)
+	if title == "" {
+		return "Unknown"
 	}
-	return "Unknown"
+	return title
 }

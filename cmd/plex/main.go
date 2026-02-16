@@ -6,10 +6,10 @@ import (
 	"os"
 
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/cmd"
-	"github.com/user/plexcli/internal/config"
-	"github.com/user/plexcli/internal/outfmt"
-	"github.com/user/plexcli/internal/ui"
+	"github.com/dogbertdev/plexcli/internal/cmd"
+	"github.com/dogbertdev/plexcli/internal/config"
+	"github.com/dogbertdev/plexcli/internal/outfmt"
+	"github.com/dogbertdev/plexcli/internal/ui"
 )
 
 var version = "dev"

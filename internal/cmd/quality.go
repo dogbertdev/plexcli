@@ -8,10 +8,10 @@ import (
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/config"
-	"github.com/user/plexcli/internal/outfmt"
-	"github.com/user/plexcli/internal/plexclient"
-	"github.com/user/plexcli/internal/ui"
+	"github.com/dogbertdev/plexcli/internal/config"
+	"github.com/dogbertdev/plexcli/internal/outfmt"
+	"github.com/dogbertdev/plexcli/internal/plexclient"
+	"github.com/dogbertdev/plexcli/internal/ui"
 )
 
 type QualityCheckCmd struct {
@@ -89,7 +89,8 @@ func (c *QualityCheckCmd) checkQuality(items []*components.Metadata, minResValue
 	var results []QualityInfo
 
 	for _, item := range items {
-		if c.Type != "all" && string(item.Type) != c.Type {
+		itemType := anyToString(item.Type)
+		if c.Type != "all" && itemType != c.Type {
 			continue
 		}
 
@@ -105,19 +106,17 @@ func (c *QualityCheckCmd) checkQuality(items []*components.Metadata, minResValue
 func (c *QualityCheckCmd) extractQualityInfo(item *components.Metadata) QualityInfo {
 	info := QualityInfo{
 		Title: qualityGetTitle(item),
-		Type:  string(item.Type),
+		Type:  anyToString(item.Type),
 	}
 
 	if item.Year != nil {
-		info.Year = *item.Year
+		info.Year = int(*item.Year)
 	}
 
 	if item.Media != nil && len(item.Media) > 0 {
 		media := item.Media[0]
 
-		if media.VideoResolution != nil {
-			info.Resolution = *media.VideoResolution
-		}
+		info.Resolution = anyToString(media.VideoResolution)
 
 		if media.Bitrate != nil {
 			info.Bitrate = int(*media.Bitrate)
@@ -135,10 +134,8 @@ func (c *QualityCheckCmd) extractQualityInfo(item *components.Metadata) QualityI
 			part := media.Part[0]
 			if part.Stream != nil {
 				for _, stream := range part.Stream {
-					if stream.StreamType == 1 {
-						if stream.Codec != "" {
-							info.VideoCodec = stream.Codec
-						}
+					if stream.StreamType != nil && *stream.StreamType == 1 {
+						info.VideoCodec = anyToString(stream.Codec)
 					}
 				}
 			}
@@ -215,8 +212,9 @@ func resolutionToValue(res string) int {
 }
 
 func qualityGetTitle(item *components.Metadata) string {
-	if item.Title != "" {
-		return item.Title
+	title := anyToString(item.Title)
+	if title == "" {
+		return "Unknown"
 	}
-	return "Unknown"
+	return title
 }

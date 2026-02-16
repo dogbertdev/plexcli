@@ -46,7 +46,7 @@ func TestExtractFilePaths(t *testing.T) {
 			Media: []components.Media{
 				{
 					Part: []components.Part{
-						{File: &file1, Size: &size1},
+						{File: file1, Size: &size1},
 					},
 				},
 			},
@@ -56,7 +56,7 @@ func TestExtractFilePaths(t *testing.T) {
 			Media: []components.Media{
 				{
 					Part: []components.Part{
-						{File: &file2, Size: &size2},
+						{File: file2, Size: &size2},
 					},
 				},
 			},

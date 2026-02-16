@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/plexcli/internal/plexclient"
+	"github.com/dogbertdev/plexcli/internal/plexclient"
 )
 
 func TestRecentlyWatchedCmd_processHistory(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/plexcli/internal/config"
+	"github.com/dogbertdev/plexcli/internal/config"
 )
 
 func TestTokenAuth_Name(t *testing.T) {
@@ -137,18 +137,6 @@ func TestGetToken_NoCredentials(t *testing.T) {
 	}
 }
 
-func TestStringPtr(t *testing.T) {
-	s := "test"
-	ptr := stringPtr(s)
-	if ptr == nil {
-		t.Error("expected non-nil pointer")
-		return
-	}
-	if *ptr != s {
-		t.Errorf("expected '%s', got '%s'", s, *ptr)
-	}
-}
-
 func TestConstants(t *testing.T) {
 	if PlexTVURL != "https://plex.tv/api/v2" {
 		t.Errorf("unexpected PlexTVURL: %s", PlexTVURL)
@@ -179,4 +167,8 @@ func TestErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func stringPtr(s string) *string {
+	return &s
 }

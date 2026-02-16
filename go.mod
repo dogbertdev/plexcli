@@ -1,11 +1,9 @@
-module github.com/user/plexcli
+module github.com/dogbertdev/plexcli
 
 go 1.22
 
-replace github.com/LukeHagar/plexgo => /Users/paulmansfield/projects/plex-cli/references/plexgo/
-
 require (
-	github.com/LukeHagar/plexgo v0.0.0-00010101000000-000000000000
+	github.com/LukeHagar/plexgo v0.27.0
 	github.com/alecthomas/kong v1.13.0
 	github.com/muesli/termenv v0.16.0
 	github.com/olekukonko/tablewriter v1.1.3

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/user/plexcli/internal/auth"
-	"github.com/user/plexcli/internal/config"
-	"github.com/user/plexcli/internal/plexclient"
+	"github.com/dogbertdev/plexcli/internal/auth"
+	"github.com/dogbertdev/plexcli/internal/config"
+	"github.com/dogbertdev/plexcli/internal/plexclient"
 )
 
 // ClientContext holds the authenticated client and context for command execution.

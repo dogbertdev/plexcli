@@ -8,10 +8,10 @@ import (
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/config"
-	"github.com/user/plexcli/internal/outfmt"
-	"github.com/user/plexcli/internal/plexclient"
-	"github.com/user/plexcli/internal/ui"
+	"github.com/dogbertdev/plexcli/internal/config"
+	"github.com/dogbertdev/plexcli/internal/outfmt"
+	"github.com/dogbertdev/plexcli/internal/plexclient"
+	"github.com/dogbertdev/plexcli/internal/ui"
 )
 
 type SubtitlesMissingCmd struct {
@@ -87,14 +87,12 @@ func (c *SubtitlesMissingCmd) checkSubtitles(ctx context.Context, items []*compo
 	var results []SubtitleInfo
 
 	for _, item := range items {
-		if c.Type != "all" && string(item.Type) != c.Type {
+		itemType := anyToString(item.Type)
+		if c.Type != "all" && itemType != c.Type {
 			continue
 		}
 
-		ratingKey := ""
-		if item.RatingKey != nil {
-			ratingKey = *item.RatingKey
-		}
+		ratingKey := anyToString(item.RatingKey)
 		if ratingKey == "" {
 			continue
 		}
@@ -120,11 +118,11 @@ func (c *SubtitlesMissingCmd) checkSubtitles(ctx context.Context, items []*compo
 func (c *SubtitlesMissingCmd) extractSubtitleInfo(item *components.Metadata, requestedLangs []string) SubtitleInfo {
 	info := SubtitleInfo{
 		Title: getTitle(item),
-		Type:  string(item.Type),
+		Type:  anyToString(item.Type),
 	}
 
 	if item.Year != nil {
-		info.Year = *item.Year
+		info.Year = int(*item.Year)
 	}
 
 	availableLangs := make(map[string]bool)
@@ -135,12 +133,11 @@ func (c *SubtitlesMissingCmd) extractSubtitleInfo(item *components.Metadata, req
 				for _, part := range media.Part {
 					if part.Stream != nil {
 						for _, stream := range part.Stream {
-							if stream.StreamType == 3 {
-								lang := ""
-								if stream.LanguageCode != nil {
-									lang = *stream.LanguageCode
-								} else if stream.Language != nil {
-									lang = *stream.Language
+							// StreamType 3 = subtitles
+							if stream.StreamType != nil && *stream.StreamType == 3 {
+								lang := anyToString(stream.LanguageCode)
+								if lang == "" {
+									lang = anyToString(stream.Language)
 								}
 								if lang != "" {
 									availableLangs[strings.ToLower(lang)] = true
@@ -220,8 +217,9 @@ func normalizeLangCode(code string) string {
 }
 
 func getTitle(item *components.Metadata) string {
-	if item.Title != "" {
-		return item.Title
+	title := anyToString(item.Title)
+	if title == "" {
+		return "Unknown"
 	}
-	return "Unknown"
+	return title
 }

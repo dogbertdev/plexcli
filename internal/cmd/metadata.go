@@ -8,10 +8,10 @@ import (
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/config"
-	"github.com/user/plexcli/internal/outfmt"
-	"github.com/user/plexcli/internal/plexclient"
-	"github.com/user/plexcli/internal/ui"
+	"github.com/dogbertdev/plexcli/internal/config"
+	"github.com/dogbertdev/plexcli/internal/outfmt"
+	"github.com/dogbertdev/plexcli/internal/plexclient"
+	"github.com/dogbertdev/plexcli/internal/ui"
 )
 
 type MetadataMissingCmd struct {
@@ -80,7 +80,8 @@ func (c *MetadataMissingCmd) checkMetadata(items []*components.Metadata) []Metad
 	var results []MetadataInfo
 
 	for _, item := range items {
-		if c.Type != "all" && string(item.Type) != c.Type {
+		itemType := anyToString(item.Type)
+		if c.Type != "all" && itemType != c.Type {
 			continue
 		}
 
@@ -88,12 +89,12 @@ func (c *MetadataMissingCmd) checkMetadata(items []*components.Metadata) []Metad
 		if len(missing) > 0 {
 			info := MetadataInfo{
 				Title:         metadataGetTitle(item),
-				Type:          string(item.Type),
+				Type:          itemType,
 				MissingFields: missing,
 			}
 
 			if item.Year != nil {
-				info.Year = *item.Year
+				info.Year = int(*item.Year)
 			}
 
 			results = append(results, info)
@@ -106,7 +107,7 @@ func (c *MetadataMissingCmd) checkMetadata(items []*components.Metadata) []Metad
 func (c *MetadataMissingCmd) getMissingFields(item *components.Metadata) []string {
 	var missing []string
 
-	if item.Title == "" {
+	if anyToString(item.Title) == "" {
 		missing = append(missing, "title")
 	}
 
@@ -114,7 +115,7 @@ func (c *MetadataMissingCmd) getMissingFields(item *components.Metadata) []strin
 		missing = append(missing, "year")
 	}
 
-	if item.Summary == nil || *item.Summary == "" {
+	if item.Summary == nil || anyToString(item.Summary) == "" {
 		missing = append(missing, "summary")
 	}
 
@@ -122,11 +123,11 @@ func (c *MetadataMissingCmd) getMissingFields(item *components.Metadata) []strin
 		missing = append(missing, "rating")
 	}
 
-	if item.Thumb == nil || *item.Thumb == "" {
+	if item.Thumb == nil || anyToString(item.Thumb) == "" {
 		missing = append(missing, "thumb")
 	}
 
-	if item.Art == nil || *item.Art == "" {
+	if item.Art == nil || anyToString(item.Art) == "" {
 		missing = append(missing, "art")
 	}
 
@@ -162,10 +163,11 @@ func (c *MetadataMissingCmd) outputResults(w io.Writer, results []MetadataInfo) 
 }
 
 func metadataGetTitle(item *components.Metadata) string {
-	if item.Title != "" {
-		return item.Title
+	title := anyToString(item.Title)
+	if title == "" {
+		return "Unknown"
 	}
-	return "Unknown"
+	return title
 }
 
 func joinMetadataStrings(parts []string, separator string) string {

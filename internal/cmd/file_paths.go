@@ -8,10 +8,10 @@ import (
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/config"
-	"github.com/user/plexcli/internal/outfmt"
-	"github.com/user/plexcli/internal/plexclient"
-	"github.com/user/plexcli/internal/ui"
+	"github.com/dogbertdev/plexcli/internal/config"
+	"github.com/dogbertdev/plexcli/internal/outfmt"
+	"github.com/dogbertdev/plexcli/internal/plexclient"
+	"github.com/dogbertdev/plexcli/internal/ui"
 )
 
 type FilePathsCmd struct {
@@ -103,7 +103,7 @@ func (c *FilePathsCmd) fetchItems(ctx context.Context, client *plexclient.Client
 		filtered := make([]*components.Metadata, 0)
 		filterLower := strings.ToLower(c.Title)
 		for _, item := range items {
-			if strings.Contains(strings.ToLower(item.Title), filterLower) {
+			if strings.Contains(strings.ToLower(anyToString(item.Title)), filterLower) {
 				filtered = append(filtered, item)
 			}
 		}
@@ -137,8 +137,8 @@ func (c *FilePathsCmd) extractFilePaths(items []*components.Metadata) []FilePath
 				}
 
 				filePaths = append(filePaths, FilePathInfo{
-					Title:    item.Title,
-					FilePath: *part.File,
+					Title:    anyToString(item.Title),
+					FilePath: anyToString(part.File),
 					Size:     size,
 				})
 			}

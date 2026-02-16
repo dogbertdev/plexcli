@@ -8,9 +8,9 @@ import (
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/alecthomas/kong"
-	"github.com/user/plexcli/internal/config"
-	"github.com/user/plexcli/internal/outfmt"
-	"github.com/user/plexcli/internal/ui"
+	"github.com/dogbertdev/plexcli/internal/config"
+	"github.com/dogbertdev/plexcli/internal/outfmt"
+	"github.com/dogbertdev/plexcli/internal/ui"
 )
 
 type UnwatchedCmd struct {
@@ -95,13 +95,14 @@ func (c *UnwatchedCmd) filterByType(items []*components.Metadata) []*components.
 			continue
 		}
 
+		itemType := anyToString(item.Type)
 		switch c.Type {
 		case "movie":
-			if string(item.Type) == "movie" {
+			if itemType == "movie" {
 				filtered = append(filtered, item)
 			}
 		case "episode":
-			if string(item.Type) == "episode" || string(item.Type) == "show" {
+			if itemType == "episode" || itemType == "show" {
 				filtered = append(filtered, item)
 			}
 		}
@@ -114,7 +115,15 @@ func (c *UnwatchedCmd) sortByAddedDate(items []*components.Metadata) []*componen
 	copy(sorted, items)
 
 	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].AddedAt > sorted[j].AddedAt
+		addedI := int64(0)
+		addedJ := int64(0)
+		if sorted[i].AddedAt != nil {
+			addedI = *sorted[i].AddedAt
+		}
+		if sorted[j].AddedAt != nil {
+			addedJ = *sorted[j].AddedAt
+		}
+		return addedI > addedJ
 	})
 
 	return sorted
@@ -128,16 +137,16 @@ func (c *UnwatchedCmd) toOutputItems(items []*components.Metadata) []UnwatchedIt
 		}
 
 		ui := UnwatchedItem{
-			Title: item.Title,
-			Type:  string(item.Type),
+			Title: anyToString(item.Title),
+			Type:  anyToString(item.Type),
 		}
 
 		if item.Year != nil {
-			ui.Year = *item.Year
+			ui.Year = int(*item.Year)
 		}
 
-		if item.AddedAt > 0 {
-			t := time.Unix(item.AddedAt, 0)
+		if item.AddedAt != nil && *item.AddedAt > 0 {
+			t := time.Unix(*item.AddedAt, 0)
 			ui.AddedAt = t.Format("2006-01-02")
 		}
 

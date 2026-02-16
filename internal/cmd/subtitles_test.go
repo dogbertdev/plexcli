@@ -41,8 +41,8 @@ func TestSubtitlesMissingCmd_extractSubtitleInfo(t *testing.T) {
 				Media: []components.Media{
 					{Part: []components.Part{
 						{Stream: []components.Stream{
-							{StreamType: 3, LanguageCode: subtitleStrPtr("en")},
-							{StreamType: 3, LanguageCode: subtitleStrPtr("fr")},
+							{StreamType: subtitleInt64Ptr(3), LanguageCode: "en"},
+							{StreamType: subtitleInt64Ptr(3), LanguageCode: "fr"},
 						}},
 					}},
 				},
@@ -60,8 +60,8 @@ func TestSubtitlesMissingCmd_extractSubtitleInfo(t *testing.T) {
 				Media: []components.Media{
 					{Part: []components.Part{
 						{Stream: []components.Stream{
-							{StreamType: 3, LanguageCode: subtitleStrPtr("en")},
-							{StreamType: 3, LanguageCode: subtitleStrPtr("de")},
+							{StreamType: subtitleInt64Ptr(3), LanguageCode: "en"},
+							{StreamType: subtitleInt64Ptr(3), LanguageCode: "de"},
 						}},
 					}},
 				},
@@ -101,7 +101,7 @@ func TestSubtitlesMissingCmd_extractSubtitleInfo_withMissing(t *testing.T) {
 			Media: []components.Media{
 				{Part: []components.Part{
 					{Stream: []components.Stream{
-						{StreamType: 3, LanguageCode: subtitleStrPtr("en")},
+						{StreamType: subtitleInt64Ptr(3), LanguageCode: "en"},
 					}},
 				}},
 			},
@@ -148,7 +148,7 @@ func TestSubtitlesMissingCmd_extractSubtitleInfo_filterByType(t *testing.T) {
 	cmd := &SubtitlesMissingCmd{Type: "movie"}
 	var results []SubtitleInfo
 	for _, item := range items {
-		if cmd.Type != "all" && string(item.Type) != cmd.Type {
+		if cmd.Type != "all" && anyToString(item.Type) != cmd.Type {
 			continue
 		}
 		info := cmd.extractSubtitleInfo(item, []string{"en"})
@@ -238,4 +238,8 @@ func TestGetTitle(t *testing.T) {
 
 func subtitleStrPtr(s string) *string {
 	return &s
+}
+
+func subtitleInt64Ptr(i int64) *int64 {
+	return &i
 }
