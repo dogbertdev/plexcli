@@ -44,6 +44,7 @@ type CLI struct {
 	Movies       cmd.MoviesCmd           `cmd:"" help:"List movies with optional filtering (e.g., by director)"`
 	Directors    cmd.DirectorsCmd        `cmd:"" help:"List all directors in a library"`
 	Match        cmd.MatchCmd            `cmd:"" help:"Fix metadata matches for items"`
+	Editions     cmd.EditionsCmd         `cmd:"" help:"List movies with editions and check for issues"`
 }
 
 func main() {
@@ -142,6 +143,7 @@ func applyOutputFormat(cli *CLI, format string) {
 	cli.Movies.Output = format
 	cli.Directors.Output = format
 	cli.Match.Search.Output = format
+	cli.Editions.Output = format
 }
 
 // loadConfig loads configuration from file and/or environment/cli flags
