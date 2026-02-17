@@ -46,6 +46,7 @@ type CLI struct {
 	Match        cmd.MatchCmd            `cmd:"" help:"Fix metadata matches for items"`
 	Editions     cmd.EditionsCmd         `cmd:"" help:"List movies with editions and check for issues"`
 	Streams      cmd.StreamsCmd          `cmd:"" help:"Manage audio and subtitle streams"`
+	Watch        cmd.WatchCmd            `cmd:"" help:"View watch activity and statistics"`
 }
 
 func main() {
@@ -147,6 +148,9 @@ func applyOutputFormat(cli *CLI, format string) {
 	cli.Editions.Output = format
 	cli.Streams.List.Output = format
 	cli.Streams.Set.Output = format
+	cli.Watch.Now.Output = format
+	cli.Watch.History.Output = format
+	cli.Watch.Stats.Output = format
 }
 
 // loadConfig loads configuration from file and/or environment/cli flags

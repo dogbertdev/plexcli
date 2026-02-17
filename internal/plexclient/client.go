@@ -2002,3 +2002,247 @@ func (c *Client) GetSeasonEpisodes(ctx context.Context, showRatingKey string, se
 
 	return episodes, nil
 }
+
+// ActiveSession represents a currently playing session
+type ActiveSession struct {
+	User     string `json:"user"`
+	Title    string `json:"title"`
+	Type     string `json:"type"`
+	Show     string `json:"show,omitempty"`
+	Progress string `json:"progress"`
+	Device   string `json:"device"`
+	State    string `json:"state"`
+}
+
+// HistoryEntry represents a watch history entry
+type HistoryEntry struct {
+	Title            string    `json:"title"`
+	Type             string    `json:"type"`
+	GrandparentTitle string    `json:"grandparent_title,omitempty"`
+	ParentIndex      int       `json:"parent_index,omitempty"`
+	Index            int       `json:"index,omitempty"`
+	AccountID        int       `json:"account_id"`
+	DeviceID         int       `json:"device_id"`
+	ViewedAt         time.Time `json:"viewed_at"`
+}
+
+// Account represents a Plex user account
+type Account struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+// GetActiveSessions returns currently active playback sessions
+func (c *Client) GetActiveSessions(ctx context.Context) ([]ActiveSession, error) {
+	var sessions []ActiveSession
+
+	err := c.executeWithRetry(ctx, "GetActiveSessions", func() error {
+		urlStr := fmt.Sprintf("%s/status/sessions?X-Plex-Token=%s", c.serverURL, c.token)
+
+		req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		var container struct {
+			XMLName xml.Name `xml:"MediaContainer"`
+			Videos  []struct {
+				Title            string `xml:"title,attr"`
+				Type             string `xml:"type,attr"`
+				GrandparentTitle string `xml:"grandparentTitle,attr"`
+				ViewOffset       int    `xml:"viewOffset,attr"`
+				Duration         int    `xml:"duration,attr"`
+				User             struct {
+					Title string `xml:"title,attr"`
+				} `xml:"User"`
+				Player struct {
+					Device string `xml:"device,attr"`
+					State  string `xml:"state,attr"`
+				} `xml:"Player"`
+			} `xml:"Video"`
+		}
+
+		if err := xml.Unmarshal(body, &container); err != nil {
+			return fmt.Errorf("failed to parse response: %w", err)
+		}
+
+		sessions = nil
+		for _, v := range container.Videos {
+			progress := ""
+			if v.Duration > 0 {
+				pct := float64(v.ViewOffset) / float64(v.Duration) * 100
+				progress = fmt.Sprintf("%.0f%%", pct)
+			}
+
+			sessions = append(sessions, ActiveSession{
+				User:     v.User.Title,
+				Title:    v.Title,
+				Type:     v.Type,
+				Show:     v.GrandparentTitle,
+				Progress: progress,
+				Device:   v.Player.Device,
+				State:    v.Player.State,
+			})
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, &PlexError{
+			Op:  "GetActiveSessions",
+			Err: err,
+		}
+	}
+
+	return sessions, nil
+}
+
+// GetWatchHistory returns the watch history
+func (c *Client) GetWatchHistory(ctx context.Context) ([]HistoryEntry, error) {
+	var history []HistoryEntry
+
+	err := c.executeWithRetry(ctx, "GetWatchHistory", func() error {
+		urlStr := fmt.Sprintf("%s/status/sessions/history/all?X-Plex-Token=%s", c.serverURL, c.token)
+
+		req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		var container struct {
+			XMLName xml.Name `xml:"MediaContainer"`
+			Videos  []struct {
+				Title            string `xml:"title,attr"`
+				Type             string `xml:"type,attr"`
+				GrandparentTitle string `xml:"grandparentTitle,attr"`
+				ParentIndex      int    `xml:"parentIndex,attr"`
+				Index            int    `xml:"index,attr"`
+				AccountID        int    `xml:"accountID,attr"`
+				DeviceID         int    `xml:"deviceID,attr"`
+				ViewedAt         int64  `xml:"viewedAt,attr"`
+			} `xml:"Video"`
+		}
+
+		if err := xml.Unmarshal(body, &container); err != nil {
+			return fmt.Errorf("failed to parse response: %w", err)
+		}
+
+		history = nil
+		for _, v := range container.Videos {
+			history = append(history, HistoryEntry{
+				Title:            v.Title,
+				Type:             v.Type,
+				GrandparentTitle: v.GrandparentTitle,
+				ParentIndex:      v.ParentIndex,
+				Index:            v.Index,
+				AccountID:        v.AccountID,
+				DeviceID:         v.DeviceID,
+				ViewedAt:         time.Unix(v.ViewedAt, 0),
+			})
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, &PlexError{
+			Op:  "GetWatchHistory",
+			Err: err,
+		}
+	}
+
+	return history, nil
+}
+
+// GetAccounts returns all user accounts on the server
+func (c *Client) GetAccounts(ctx context.Context) ([]Account, error) {
+	var accounts []Account
+
+	err := c.executeWithRetry(ctx, "GetAccounts", func() error {
+		urlStr := fmt.Sprintf("%s/accounts?X-Plex-Token=%s", c.serverURL, c.token)
+
+		req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		var container struct {
+			XMLName  xml.Name `xml:"MediaContainer"`
+			Accounts []struct {
+				ID   int    `xml:"id,attr"`
+				Name string `xml:"name,attr"`
+			} `xml:"Account"`
+		}
+
+		if err := xml.Unmarshal(body, &container); err != nil {
+			return fmt.Errorf("failed to parse response: %w", err)
+		}
+
+		accounts = nil
+		for _, a := range container.Accounts {
+			if a.Name != "" { // Skip empty accounts
+				accounts = append(accounts, Account{
+					ID:   a.ID,
+					Name: a.Name,
+				})
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, &PlexError{
+			Op:  "GetAccounts",
+			Err: err,
+		}
+	}
+
+	return accounts, nil
+}
