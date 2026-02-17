@@ -120,7 +120,7 @@ func (c *Client) executeWithRetry(ctx context.Context, op string, fn func() erro
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("%s cancelled: %w", op, ctx.Err())
+			return fmt.Errorf("%s canceled: %w", op, ctx.Err())
 		default:
 		}
 
@@ -139,7 +139,7 @@ func (c *Client) executeWithRetry(ctx context.Context, op string, fn func() erro
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return fmt.Errorf("%s cancelled during retry: %w", op, ctx.Err())
+				return fmt.Errorf("%s canceled during retry: %w", op, ctx.Err())
 			case <-timer.C:
 			}
 			continue
@@ -815,16 +815,7 @@ func (c *Client) ListPlaylists(ctx context.Context) ([]PlaylistInfo, error) {
 		}
 
 		for _, p := range rawResp.MediaContainer.Metadata {
-			playlists = append(playlists, PlaylistInfo{
-				RatingKey:    p.RatingKey,
-				Key:          p.Key,
-				Title:        p.Title,
-				Type:         p.Type,
-				PlaylistType: p.PlaylistType,
-				LeafCount:    p.LeafCount,
-				Smart:        p.Smart,
-				Duration:     p.Duration,
-			})
+			playlists = append(playlists, PlaylistInfo(p))
 		}
 
 		return nil
@@ -1914,8 +1905,8 @@ func (c *Client) GetSeasonEpisodes(ctx context.Context, showRatingKey string, se
 			} `xml:"Directory"`
 		}
 
-		if err := xml.Unmarshal(body, &seasonsContainer); err != nil {
-			return fmt.Errorf("failed to parse seasons response: %w", err)
+		if unmarshalErr := xml.Unmarshal(body, &seasonsContainer); unmarshalErr != nil {
+			return fmt.Errorf("failed to parse seasons response: %w", unmarshalErr)
 		}
 
 		// Find the matching season

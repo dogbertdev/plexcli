@@ -73,7 +73,9 @@ func (u *UI) Profile() termenv.Profile {
 	return u.profile
 }
 
-var uiContextKey = struct{}{}
+var uiContextKey = uiKey{}
+
+type uiKey struct{}
 
 // WithUI adds the UI to the context
 func WithUI(ctx context.Context, u *UI) context.Context {

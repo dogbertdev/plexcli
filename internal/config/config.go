@@ -66,8 +66,8 @@ func ReadConfig() (*Config, error) {
 
 	data, err := os.ReadFile(path)
 	if err == nil {
-		if err := json5.Unmarshal(data, cfg); err != nil {
-			return nil, fmt.Errorf("failed to parse config file: %w", err)
+		if unmarshalErr := json5.Unmarshal(data, cfg); unmarshalErr != nil {
+			return nil, fmt.Errorf("failed to parse config file: %w", unmarshalErr)
 		}
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
@@ -98,8 +98,8 @@ func WriteConfig(cfg *Config) error {
 	}
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, dirPermissions); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
+	if mkdirErr := os.MkdirAll(dir, dirPermissions); mkdirErr != nil {
+		return fmt.Errorf("failed to create config directory: %w", mkdirErr)
 	}
 
 	data, err := json5.MarshalIndent(cfg, "", "  ")

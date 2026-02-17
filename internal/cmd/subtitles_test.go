@@ -236,10 +236,6 @@ func TestGetTitle(t *testing.T) {
 	}
 }
 
-func subtitleStrPtr(s string) *string {
-	return &s
-}
-
 func subtitleInt64Ptr(i int64) *int64 {
 	return &i
 }

@@ -32,10 +32,6 @@ func TestFormatSize(t *testing.T) {
 	}
 }
 
-func filePathStrPtr(s string) string {
-	return s
-}
-
 func TestExtractFilePaths(t *testing.T) {
 	cmd := &FilePathsCmd{}
 

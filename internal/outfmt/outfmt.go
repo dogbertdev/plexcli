@@ -10,7 +10,9 @@ import (
 	"github.com/olekukonko/tablewriter"
 )
 
-var formatContextKey = struct{}{}
+var formatContextKey = formatKey{}
+
+type formatKey struct{}
 
 type Format string
 
@@ -30,7 +32,7 @@ func (f *TableFormatter) Format(w io.Writer, header []string, rows [][]string, d
 	table := tablewriter.NewWriter(w)
 	table.Header(header)
 	for _, row := range rows {
-		table.Append(row)
+		_ = table.Append(row)
 	}
 	return table.Render()
 }

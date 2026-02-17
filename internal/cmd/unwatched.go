@@ -38,14 +38,14 @@ func (c *UnwatchedCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) erro
 	if c.Section != "" {
 		items, err = cc.Client.GetAllLibraryItems(cc.Ctx, c.Section)
 	} else {
-		sections, err := cc.Client.GetSections(cc.Ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get sections: %w", err)
+		sections, sectionsErr := cc.Client.GetSections(cc.Ctx)
+		if sectionsErr != nil {
+			return fmt.Errorf("failed to get sections: %w", sectionsErr)
 		}
 		for _, section := range sections {
-			sectionItems, err := cc.Client.GetAllLibraryItems(cc.Ctx, section.ID)
-			if err != nil {
-				return fmt.Errorf("failed to get items from section %s: %w", section.ID, err)
+			sectionItems, sectionErr := cc.Client.GetAllLibraryItems(cc.Ctx, section.ID)
+			if sectionErr != nil {
+				return fmt.Errorf("failed to get items from section %s: %w", section.ID, sectionErr)
 			}
 			items = append(items, sectionItems...)
 		}
