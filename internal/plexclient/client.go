@@ -1711,3 +1711,294 @@ func (c *Client) ApplyMatch(ctx context.Context, ratingKey string, guid string, 
 		return nil
 	})
 }
+
+// StreamInfo represents an audio or subtitle stream
+type StreamInfo struct {
+	ID           int    `json:"id"`
+	StreamType   int    `json:"stream_type"`
+	Language     string `json:"language"`
+	LanguageCode string `json:"language_code"`
+	Codec        string `json:"codec"`
+	Title        string `json:"title,omitempty"`
+	Channels     int    `json:"channels,omitempty"`
+	Selected     bool   `json:"selected"`
+	Default      bool   `json:"default"`
+}
+
+// EpisodeInfo represents basic episode information
+type EpisodeInfo struct {
+	RatingKey string
+	PartID    string
+	Title     string
+	Season    int
+	Episode   int
+}
+
+// GetStreams returns all streams (video, audio, subtitle) for an item
+func (c *Client) GetStreams(ctx context.Context, ratingKey string) ([]StreamInfo, error) {
+	if ratingKey == "" {
+		return nil, &PlexError{
+			Op:  "GetStreams",
+			Err: fmt.Errorf("rating key is required"),
+		}
+	}
+
+	var streams []StreamInfo
+
+	err := c.executeWithRetry(ctx, "GetStreams", func() error {
+		urlStr := fmt.Sprintf("%s/library/metadata/%s?X-Plex-Token=%s",
+			c.serverURL, ratingKey, c.token)
+
+		req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		var container struct {
+			XMLName xml.Name `xml:"MediaContainer"`
+			Video   []struct {
+				Media []struct {
+					Part []struct {
+						Stream []struct {
+							ID           int    `xml:"id,attr"`
+							StreamType   int    `xml:"streamType,attr"`
+							Language     string `xml:"language,attr"`
+							LanguageCode string `xml:"languageCode,attr"`
+							Codec        string `xml:"codec,attr"`
+							Title        string `xml:"displayTitle,attr"`
+							Channels     int    `xml:"channels,attr"`
+							Selected     int    `xml:"selected,attr"`
+							Default      int    `xml:"default,attr"`
+						} `xml:"Stream"`
+					} `xml:"Part"`
+				} `xml:"Media"`
+			} `xml:"Video"`
+		}
+
+		if err := xml.Unmarshal(body, &container); err != nil {
+			return fmt.Errorf("failed to parse response: %w", err)
+		}
+
+		streams = nil
+		for _, video := range container.Video {
+			for _, media := range video.Media {
+				for _, part := range media.Part {
+					for _, s := range part.Stream {
+						streams = append(streams, StreamInfo{
+							ID:           s.ID,
+							StreamType:   s.StreamType,
+							Language:     s.Language,
+							LanguageCode: s.LanguageCode,
+							Codec:        s.Codec,
+							Title:        s.Title,
+							Channels:     s.Channels,
+							Selected:     s.Selected == 1,
+							Default:      s.Default == 1,
+						})
+					}
+				}
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, &PlexError{
+			Op:  "GetStreams",
+			Err: err,
+		}
+	}
+
+	return streams, nil
+}
+
+// SetStreams sets the default audio and/or subtitle stream for a part
+func (c *Client) SetStreams(ctx context.Context, partID string, audioStreamID, subtitleStreamID int) error {
+	if partID == "" {
+		return &PlexError{
+			Op:  "SetStreams",
+			Err: fmt.Errorf("part ID is required"),
+		}
+	}
+
+	return c.executeWithRetry(ctx, "SetStreams", func() error {
+		urlStr := fmt.Sprintf("%s/library/parts/%s?X-Plex-Token=%s",
+			c.serverURL, partID, c.token)
+
+		if audioStreamID > 0 {
+			urlStr += fmt.Sprintf("&audioStreamID=%d", audioStreamID)
+		}
+		if subtitleStreamID > 0 {
+			urlStr += fmt.Sprintf("&subtitleStreamID=%d", subtitleStreamID)
+		} else if subtitleStreamID == 0 {
+			// 0 means disable subtitles
+			urlStr += "&subtitleStreamID=0"
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "PUT", urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		return nil
+	})
+}
+
+// GetSeasonEpisodes returns all episodes for a specific season of a show
+func (c *Client) GetSeasonEpisodes(ctx context.Context, showRatingKey string, seasonNum int) ([]EpisodeInfo, error) {
+	if showRatingKey == "" {
+		return nil, &PlexError{
+			Op:  "GetSeasonEpisodes",
+			Err: fmt.Errorf("show rating key is required"),
+		}
+	}
+
+	var episodes []EpisodeInfo
+
+	err := c.executeWithRetry(ctx, "GetSeasonEpisodes", func() error {
+		// First get seasons
+		urlStr := fmt.Sprintf("%s/library/metadata/%s/children?X-Plex-Token=%s",
+			c.serverURL, showRatingKey, c.token)
+
+		req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		var seasonsContainer struct {
+			XMLName xml.Name `xml:"MediaContainer"`
+			Seasons []struct {
+				RatingKey string `xml:"ratingKey,attr"`
+				Index     int    `xml:"index,attr"`
+			} `xml:"Directory"`
+		}
+
+		if err := xml.Unmarshal(body, &seasonsContainer); err != nil {
+			return fmt.Errorf("failed to parse seasons response: %w", err)
+		}
+
+		// Find the matching season
+		var seasonKey string
+		for _, s := range seasonsContainer.Seasons {
+			if s.Index == seasonNum {
+				seasonKey = s.RatingKey
+				break
+			}
+		}
+
+		if seasonKey == "" {
+			return fmt.Errorf("season %d not found", seasonNum)
+		}
+
+		// Get episodes for the season
+		urlStr = fmt.Sprintf("%s/library/metadata/%s/children?X-Plex-Token=%s",
+			c.serverURL, seasonKey, c.token)
+
+		req, err = http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		resp, err = c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		body, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		var episodesContainer struct {
+			XMLName  xml.Name `xml:"MediaContainer"`
+			Episodes []struct {
+				RatingKey   string `xml:"ratingKey,attr"`
+				Title       string `xml:"title,attr"`
+				ParentIndex int    `xml:"parentIndex,attr"`
+				Index       int    `xml:"index,attr"`
+				Media       []struct {
+					Part []struct {
+						ID string `xml:"id,attr"`
+					} `xml:"Part"`
+				} `xml:"Media"`
+			} `xml:"Video"`
+		}
+
+		if err := xml.Unmarshal(body, &episodesContainer); err != nil {
+			return fmt.Errorf("failed to parse episodes response: %w", err)
+		}
+
+		episodes = nil
+		for _, ep := range episodesContainer.Episodes {
+			partID := ""
+			if len(ep.Media) > 0 && len(ep.Media[0].Part) > 0 {
+				partID = ep.Media[0].Part[0].ID
+			}
+
+			episodes = append(episodes, EpisodeInfo{
+				RatingKey: ep.RatingKey,
+				PartID:    partID,
+				Title:     ep.Title,
+				Season:    ep.ParentIndex,
+				Episode:   ep.Index,
+			})
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, &PlexError{
+			Op:  "GetSeasonEpisodes",
+			Err: err,
+		}
+	}
+
+	return episodes, nil
+}
