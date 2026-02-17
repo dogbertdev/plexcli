@@ -901,17 +901,17 @@ func (c *Client) CreatePlaylist(ctx context.Context, title string, playlistType 
 	}
 
 	// Get server UUID for constructing the URI
-	serverUUID, err := c.GetServerUUID(ctx)
-	if err != nil {
+	serverUUID, uuidErr := c.GetServerUUID(ctx)
+	if uuidErr != nil {
 		return nil, &PlexError{
 			Op:  "CreatePlaylist",
-			Err: fmt.Errorf("failed to get server UUID: %w", err),
+			Err: fmt.Errorf("failed to get server UUID: %w", uuidErr),
 		}
 	}
 
 	var playlist *PlaylistInfo
 
-	err = c.executeWithRetry(ctx, "CreatePlaylist", func() error {
+	retryErr := c.executeWithRetry(ctx, "CreatePlaylist", func() error {
 		urlStr := fmt.Sprintf("%s/playlists?title=%s&type=%s&smart=0&X-Plex-Token=%s",
 			c.serverURL, url.QueryEscape(title), playlistType, c.token)
 
@@ -968,10 +968,10 @@ func (c *Client) CreatePlaylist(ctx context.Context, title string, playlistType 
 		return nil
 	})
 
-	if err != nil {
+	if retryErr != nil {
 		return nil, &PlexError{
 			Op:  "CreatePlaylist",
-			Err: err,
+			Err: retryErr,
 		}
 	}
 
@@ -1119,15 +1119,15 @@ func (c *Client) AddToPlaylist(ctx context.Context, playlistID string, ratingKey
 	}
 
 	// Get server UUID for constructing the URI
-	serverUUID, err := c.GetServerUUID(ctx)
-	if err != nil {
+	serverUUID, uuidErr := c.GetServerUUID(ctx)
+	if uuidErr != nil {
 		return &PlexError{
 			Op:  "AddToPlaylist",
-			Err: fmt.Errorf("failed to get server UUID: %w", err),
+			Err: fmt.Errorf("failed to get server UUID: %w", uuidErr),
 		}
 	}
 
-	err = c.executeWithRetry(ctx, "AddToPlaylist", func() error {
+	retryErr := c.executeWithRetry(ctx, "AddToPlaylist", func() error {
 		// URI format: server://{uuid}/com.plexapp.plugins.library/library/metadata/{key1},{key2},...
 		uri := fmt.Sprintf("server://%s/com.plexapp.plugins.library/library/metadata/%s",
 			serverUUID, strings.Join(ratingKeys, ","))
@@ -1156,10 +1156,10 @@ func (c *Client) AddToPlaylist(ctx context.Context, playlistID string, ratingKey
 		return nil
 	})
 
-	if err != nil {
+	if retryErr != nil {
 		return &PlexError{
 			Op:  "AddToPlaylist",
-			Err: err,
+			Err: retryErr,
 		}
 	}
 
