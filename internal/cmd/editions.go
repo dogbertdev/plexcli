@@ -30,10 +30,12 @@ type EditionInfo struct {
 	Section         string `json:"section"`
 	EditionTitle    string `json:"edition_title,omitempty"`
 	FileEdition     string `json:"file_edition,omitempty"`
+	RawEditionTag   string `json:"raw_edition_tag,omitempty"`
 	FilePath        string `json:"file_path"`
 	HasMetaEdition  bool   `json:"has_meta_edition"`
 	HasFileEdition  bool   `json:"has_file_edition"`
 	EditionMismatch bool   `json:"edition_mismatch,omitempty"`
+	Issue           string `json:"issue,omitempty"`
 }
 
 type editionItemWithSection struct {
@@ -42,6 +44,7 @@ type editionItemWithSection struct {
 }
 
 var editionRegex = regexp.MustCompile(`\{[Ee]dition[-\s]?([^}]+)\}`)
+var rawEditionTagRegex = regexp.MustCompile(`(\{[Ee]dition[-\s]?[^}]+\})`)
 
 func (c *EditionsCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
 	cc, err := NewClientContext(cfg)
@@ -134,8 +137,12 @@ func (c *EditionsCmd) extractEditions(items []editionItemWithSection) []EditionI
 
 				// Extract edition from file path
 				fileEdition := ""
+				rawTag := ""
 				if matches := editionRegex.FindStringSubmatch(filePath); len(matches) > 1 {
 					fileEdition = strings.TrimSpace(matches[1])
+				}
+				if matches := rawEditionTagRegex.FindStringSubmatch(filePath); len(matches) > 1 {
+					rawTag = matches[1]
 				}
 
 				// Get edition from metadata
@@ -157,6 +164,7 @@ func (c *EditionsCmd) extractEditions(items []editionItemWithSection) []EditionI
 					Section:        iws.section,
 					EditionTitle:   metaEdition,
 					FileEdition:    fileEdition,
+					RawEditionTag:  rawTag,
 					FilePath:       filePath,
 					HasMetaEdition: metaEdition != "",
 					HasFileEdition: fileEdition != "",
@@ -173,6 +181,9 @@ func (c *EditionsCmd) extractEditions(items []editionItemWithSection) []EditionI
 					normalizedMeta := strings.ToLower(strings.ReplaceAll(metaEdition, " ", ""))
 					info.EditionMismatch = normalizedFile != normalizedMeta
 				}
+
+				// Diagnose issues
+				info.Issue = diagnoseEditionIssue(rawTag, fileEdition, metaEdition, info.EditionMismatch)
 
 				editions = append(editions, info)
 			}
@@ -193,18 +204,59 @@ func (c *EditionsCmd) extractEditions(items []editionItemWithSection) []EditionI
 func (c *EditionsCmd) filterIssues(editions []EditionInfo) []EditionInfo {
 	var issues []EditionInfo
 	for _, e := range editions {
-		// Issue: has file edition but no metadata edition
-		if e.HasFileEdition && !e.HasMetaEdition {
+		if e.Issue != "" {
 			issues = append(issues, e)
-			continue
-		}
-		// Issue: edition mismatch
-		if e.EditionMismatch {
-			issues = append(issues, e)
-			continue
 		}
 	}
 	return issues
+}
+
+// diagnoseEditionIssue analyzes the edition tag and returns a human-readable explanation
+func diagnoseEditionIssue(rawTag, fileEdition, metaEdition string, mismatch bool) string {
+	if fileEdition == "" && metaEdition != "" {
+		return "" // No issue - metadata edition without file tag is fine
+	}
+
+	if fileEdition != "" && metaEdition != "" && !mismatch {
+		return "" // No issue - both match
+	}
+
+	if mismatch {
+		return fmt.Sprintf("Mismatch: file has '%s' but metadata has '%s'", fileEdition, metaEdition)
+	}
+
+	// File has edition but metadata doesn't - diagnose why
+	if rawTag == "" {
+		return "Edition tag not found in filename"
+	}
+
+	// Check for common format issues
+	issues := []string{}
+
+	// Check for correct format: {edition-Name}
+	correctFormat := regexp.MustCompile(`^\{edition-[^}]+\}$`)
+	if !correctFormat.MatchString(rawTag) {
+		// Diagnose specific issues
+		if strings.Contains(rawTag, "Edition") {
+			issues = append(issues, "use lowercase 'edition'")
+		}
+		if strings.Contains(rawTag, "{edition ") || strings.Contains(rawTag, "{Edition ") {
+			issues = append(issues, "use dash not space after 'edition'")
+		}
+		if strings.Contains(rawTag, "{edition--") || strings.Contains(rawTag, "{Edition--") {
+			issues = append(issues, "remove extra dash")
+		}
+		if strings.HasPrefix(rawTag, "-{") || strings.HasSuffix(rawTag, "}-") {
+			issues = append(issues, "edition tag should not have adjacent dashes")
+		}
+	}
+
+	if len(issues) > 0 {
+		return fmt.Sprintf("Bad format %s: %s. Use {edition-Name}", rawTag, strings.Join(issues, ", "))
+	}
+
+	// Format looks OK but still not recognized
+	return fmt.Sprintf("Tag %s not recognized - try refreshing metadata or re-scanning", rawTag)
 }
 
 func (c *EditionsCmd) outputResults(w io.Writer, editions []EditionInfo) error {
@@ -219,20 +271,13 @@ func (c *EditionsCmd) outputResults(w io.Writer, editions []EditionInfo) error {
 			yearStr = fmt.Sprintf("%d", e.Year)
 		}
 
-		issue := ""
-		if e.HasFileEdition && !e.HasMetaEdition {
-			issue = "Not recognized"
-		} else if e.EditionMismatch {
-			issue = "Mismatch"
-		}
-
 		rows[i] = []string{
 			e.Title,
 			yearStr,
 			e.Section,
 			e.EditionTitle,
 			e.FileEdition,
-			issue,
+			e.Issue,
 		}
 	}
 
