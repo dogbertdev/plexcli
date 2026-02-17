@@ -25,7 +25,13 @@ type RecentlyAddedItem struct {
 	Title   string    `json:"title"`
 	Year    int       `json:"year,omitempty"`
 	Type    string    `json:"type"`
+	Section string    `json:"section"`
 	AddedAt time.Time `json:"added_at"`
+}
+
+type itemWithSection struct {
+	item    *components.Metadata
+	section string
 }
 
 func (c *RecentlyAddedCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
@@ -50,29 +56,36 @@ func (c *RecentlyAddedCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) 
 	return c.outputResults(u.Out(), results)
 }
 
-func (c *RecentlyAddedCmd) fetchRecentlyAdded(ctx context.Context, client *plexclient.Client) ([]*components.Metadata, error) {
+func (c *RecentlyAddedCmd) fetchRecentlyAdded(ctx context.Context, client *plexclient.Client) ([]itemWithSection, error) {
 	sections, err := client.GetSections(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get sections: %w", err)
 	}
 
-	var allItems []*components.Metadata
+	var allItems []itemWithSection
 	for _, section := range sections {
+		sectionName := ""
+		if section.Title != nil {
+			sectionName = *section.Title
+		}
 		items, err := client.GetAllLibraryItems(ctx, section.ID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get items from section %s: %w", section.ID, err)
 		}
-		allItems = append(allItems, items...)
+		for _, item := range items {
+			allItems = append(allItems, itemWithSection{item: item, section: sectionName})
+		}
 	}
 
 	return allItems, nil
 }
 
-func (c *RecentlyAddedCmd) processItems(items []*components.Metadata) []RecentlyAddedItem {
+func (c *RecentlyAddedCmd) processItems(items []itemWithSection) []RecentlyAddedItem {
 	cutoffTime := time.Now().AddDate(0, 0, -c.Days)
 	var results []RecentlyAddedItem
 
-	for _, item := range items {
+	for _, iws := range items {
+		item := iws.item
 		itemType := anyToString(item.Type)
 		if c.Type != "all" && itemType != c.Type {
 			continue
@@ -90,6 +103,7 @@ func (c *RecentlyAddedCmd) processItems(items []*components.Metadata) []Recently
 		result := RecentlyAddedItem{
 			Title:   recentlyGetTitle(item),
 			Type:    itemType,
+			Section: iws.section,
 			AddedAt: addedAt,
 		}
 
@@ -110,7 +124,7 @@ func (c *RecentlyAddedCmd) processItems(items []*components.Metadata) []Recently
 func (c *RecentlyAddedCmd) outputResults(w io.Writer, results []RecentlyAddedItem) error {
 	formatter := outfmt.NewFormatter(outfmt.Format(c.Output))
 
-	header := []string{"TITLE", "YEAR", "TYPE", "ADDED AT"}
+	header := []string{"TITLE", "YEAR", "TYPE", "SECTION", "ADDED AT"}
 	rows := make([][]string, len(results))
 
 	for i, r := range results {
@@ -128,6 +142,7 @@ func (c *RecentlyAddedCmd) outputResults(w io.Writer, results []RecentlyAddedIte
 			r.Title,
 			yearStr,
 			r.Type,
+			r.Section,
 			addedAtStr,
 		}
 	}

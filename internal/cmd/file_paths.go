@@ -23,8 +23,14 @@ type FilePathsCmd struct {
 
 type FilePathInfo struct {
 	Title    string `json:"title"`
+	Section  string `json:"section"`
 	FilePath string `json:"file_path"`
 	Size     int64  `json:"size"`
+}
+
+type fileItemWithSection struct {
+	item    *components.Metadata
+	section string
 }
 
 func (c *FilePathsCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
@@ -61,12 +67,13 @@ func (c *FilePathsCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) erro
 func (c *FilePathsCmd) outputResults(w io.Writer, filePaths []FilePathInfo) error {
 	formatter := outfmt.NewFormatter(outfmt.Format(c.Output))
 
-	header := []string{"TITLE", "FILE PATH", "SIZE"}
+	header := []string{"TITLE", "SECTION", "FILE PATH", "SIZE"}
 	rows := make([][]string, len(filePaths))
 
 	for i, fp := range filePaths {
 		rows[i] = []string{
 			fp.Title,
+			fp.Section,
 			fp.FilePath,
 			formatSize(fp.Size),
 		}
@@ -75,15 +82,28 @@ func (c *FilePathsCmd) outputResults(w io.Writer, filePaths []FilePathInfo) erro
 	return formatter.Format(w, header, rows, filePaths)
 }
 
-func (c *FilePathsCmd) fetchItems(ctx context.Context, client *plexclient.Client) ([]*components.Metadata, error) {
-	var items []*components.Metadata
+func (c *FilePathsCmd) fetchItems(ctx context.Context, client *plexclient.Client) ([]fileItemWithSection, error) {
+	var items []fileItemWithSection
 
 	if c.Section != "" {
+		sections, err := client.GetSections(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch sections: %w", err)
+		}
+		sectionName := c.Section
+		for _, s := range sections {
+			if s.ID == c.Section && s.Title != nil {
+				sectionName = *s.Title
+				break
+			}
+		}
 		sectionItems, err := client.GetAllLibraryItems(ctx, c.Section)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch library items: %w", err)
 		}
-		items = sectionItems
+		for _, item := range sectionItems {
+			items = append(items, fileItemWithSection{item: item, section: sectionName})
+		}
 	} else {
 		sections, err := client.GetSections(ctx)
 		if err != nil {
@@ -91,20 +111,26 @@ func (c *FilePathsCmd) fetchItems(ctx context.Context, client *plexclient.Client
 		}
 
 		for _, section := range sections {
+			sectionName := ""
+			if section.Title != nil {
+				sectionName = *section.Title
+			}
 			sectionItems, err := client.GetAllLibraryItems(ctx, section.ID)
 			if err != nil {
 				continue
 			}
-			items = append(items, sectionItems...)
+			for _, item := range sectionItems {
+				items = append(items, fileItemWithSection{item: item, section: sectionName})
+			}
 		}
 	}
 
 	if c.Title != "" {
-		filtered := make([]*components.Metadata, 0)
+		filtered := make([]fileItemWithSection, 0)
 		filterLower := strings.ToLower(c.Title)
-		for _, item := range items {
-			if strings.Contains(strings.ToLower(anyToString(item.Title)), filterLower) {
-				filtered = append(filtered, item)
+		for _, iws := range items {
+			if strings.Contains(strings.ToLower(anyToString(iws.item.Title)), filterLower) {
+				filtered = append(filtered, iws)
 			}
 		}
 		items = filtered
@@ -113,10 +139,11 @@ func (c *FilePathsCmd) fetchItems(ctx context.Context, client *plexclient.Client
 	return items, nil
 }
 
-func (c *FilePathsCmd) extractFilePaths(items []*components.Metadata) []FilePathInfo {
+func (c *FilePathsCmd) extractFilePaths(items []fileItemWithSection) []FilePathInfo {
 	var filePaths []FilePathInfo
 
-	for _, item := range items {
+	for _, iws := range items {
+		item := iws.item
 		if item.Media == nil {
 			continue
 		}
@@ -138,6 +165,7 @@ func (c *FilePathsCmd) extractFilePaths(items []*components.Metadata) []FilePath
 
 				filePaths = append(filePaths, FilePathInfo{
 					Title:    anyToString(item.Title),
+					Section:  iws.section,
 					FilePath: anyToString(part.File),
 					Size:     size,
 				})

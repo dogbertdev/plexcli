@@ -32,6 +32,10 @@ func TestFormatSize(t *testing.T) {
 	}
 }
 
+func filePathStrPtr(s string) string {
+	return s
+}
+
 func TestExtractFilePaths(t *testing.T) {
 	cmd := &FilePathsCmd{}
 
@@ -40,26 +44,32 @@ func TestExtractFilePaths(t *testing.T) {
 	file2 := "/movies/Movie 2.mp4"
 	size2 := int64(2 * 1024 * 1024 * 1024)
 
-	items := []*components.Metadata{
+	items := []fileItemWithSection{
 		{
-			Title: "Movie 1",
-			Media: []components.Media{
-				{
-					Part: []components.Part{
-						{File: file1, Size: &size1},
+			item: &components.Metadata{
+				Title: "Movie 1",
+				Media: []components.Media{
+					{
+						Part: []components.Part{
+							{File: &file1, Size: &size1},
+						},
 					},
 				},
 			},
+			section: "Movies",
 		},
 		{
-			Title: "Movie 2",
-			Media: []components.Media{
-				{
-					Part: []components.Part{
-						{File: file2, Size: &size2},
+			item: &components.Metadata{
+				Title: "Movie 2",
+				Media: []components.Media{
+					{
+						Part: []components.Part{
+							{File: &file2, Size: &size2},
+						},
 					},
 				},
 			},
+			section: "Movies",
 		},
 	}
 
@@ -80,13 +90,17 @@ func TestExtractFilePaths(t *testing.T) {
 	if result[0].Size != size1 {
 		t.Errorf("Expected size %d, got %d", size1, result[0].Size)
 	}
+
+	if result[0].Section != "Movies" {
+		t.Errorf("Expected section 'Movies', got %s", result[0].Section)
+	}
 }
 
 func TestExtractFilePaths_NoMedia(t *testing.T) {
 	cmd := &FilePathsCmd{}
 
-	items := []*components.Metadata{
-		{Title: "Movie Without Media"},
+	items := []fileItemWithSection{
+		{item: &components.Metadata{Title: "Movie Without Media"}, section: "Movies"},
 	}
 
 	result := cmd.extractFilePaths(items)
@@ -99,16 +113,19 @@ func TestExtractFilePaths_NoMedia(t *testing.T) {
 func TestExtractFilePaths_NoFile(t *testing.T) {
 	cmd := &FilePathsCmd{}
 
-	items := []*components.Metadata{
+	items := []fileItemWithSection{
 		{
-			Title: "Movie Without File",
-			Media: []components.Media{
-				{
-					Part: []components.Part{
-						{File: nil, Size: nil},
+			item: &components.Metadata{
+				Title: "Movie Without File",
+				Media: []components.Media{
+					{
+						Part: []components.Part{
+							{File: nil, Size: nil},
+						},
 					},
 				},
 			},
+			section: "Movies",
 		},
 	}
 
