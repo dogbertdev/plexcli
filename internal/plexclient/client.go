@@ -1581,3 +1581,133 @@ func (c *Client) GetDirectors(ctx context.Context, sectionID string) ([]Director
 
 	return directors, nil
 }
+
+// MatchResult represents a potential metadata match for an item
+type MatchResult struct {
+	GUID    string `json:"guid"`
+	Name    string `json:"name"`
+	Year    int    `json:"year,omitempty"`
+	Summary string `json:"summary,omitempty"`
+}
+
+// SearchMatches searches for metadata matches for an item (like Plex's "Fix Match" feature)
+func (c *Client) SearchMatches(ctx context.Context, ratingKey string, title string, year int) ([]MatchResult, error) {
+	if ratingKey == "" {
+		return nil, &PlexError{
+			Op:  "SearchMatches",
+			Err: fmt.Errorf("rating key is required"),
+		}
+	}
+
+	var results []MatchResult
+
+	err := c.executeWithRetry(ctx, "SearchMatches", func() error {
+		urlStr := fmt.Sprintf("%s/library/metadata/%s/matches?manual=1&X-Plex-Token=%s",
+			c.serverURL, ratingKey, c.token)
+
+		if title != "" {
+			urlStr += "&title=" + url.QueryEscape(title)
+		}
+		if year > 0 {
+			urlStr += fmt.Sprintf("&year=%d", year)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		// Parse XML response
+		var container struct {
+			XMLName xml.Name `xml:"MediaContainer"`
+			Results []struct {
+				GUID    string `xml:"guid,attr"`
+				Name    string `xml:"name,attr"`
+				Year    int    `xml:"year,attr"`
+				Summary string `xml:"summary,attr"`
+			} `xml:"SearchResult"`
+		}
+
+		if err := xml.Unmarshal(body, &container); err != nil {
+			return fmt.Errorf("failed to parse response: %w", err)
+		}
+
+		results = make([]MatchResult, len(container.Results))
+		for i, r := range container.Results {
+			results[i] = MatchResult{
+				GUID:    r.GUID,
+				Name:    r.Name,
+				Year:    r.Year,
+				Summary: r.Summary,
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, &PlexError{
+			Op:  "SearchMatches",
+			Err: err,
+		}
+	}
+
+	return results, nil
+}
+
+// ApplyMatch applies a metadata match to an item (like selecting a match in Plex's "Fix Match")
+func (c *Client) ApplyMatch(ctx context.Context, ratingKey string, guid string, name string) error {
+	if ratingKey == "" {
+		return &PlexError{
+			Op:  "ApplyMatch",
+			Err: fmt.Errorf("rating key is required"),
+		}
+	}
+	if guid == "" {
+		return &PlexError{
+			Op:  "ApplyMatch",
+			Err: fmt.Errorf("guid is required"),
+		}
+	}
+
+	return c.executeWithRetry(ctx, "ApplyMatch", func() error {
+		urlStr := fmt.Sprintf("%s/library/metadata/%s/match?guid=%s&X-Plex-Token=%s",
+			c.serverURL, ratingKey, url.QueryEscape(guid), c.token)
+
+		if name != "" {
+			urlStr += "&name=" + url.QueryEscape(name)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "PUT", urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		return nil
+	})
+}
