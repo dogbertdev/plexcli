@@ -108,13 +108,13 @@ func WriteConfig(cfg *Config) error {
 	}
 
 	tmpFile := path + ".tmp"
-	if err := os.WriteFile(tmpFile, data, filePermissions); err != nil {
-		return fmt.Errorf("failed to write temporary config file: %w", err)
+	if writeErr := os.WriteFile(tmpFile, data, filePermissions); writeErr != nil {
+		return fmt.Errorf("failed to write temporary config file: %w", writeErr)
 	}
 
-	if err := os.Rename(tmpFile, path); err != nil {
+	if renameErr := os.Rename(tmpFile, path); renameErr != nil {
 		os.Remove(tmpFile)
-		return fmt.Errorf("failed to rename temporary config file: %w", err)
+		return fmt.Errorf("failed to rename temporary config file: %w", renameErr)
 	}
 
 	return nil
