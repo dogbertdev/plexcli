@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/alecthomas/kong"
+
 	"github.com/dogbertdev/plexcli/internal/config"
 	"github.com/dogbertdev/plexcli/internal/outfmt"
 	"github.com/dogbertdev/plexcli/internal/ui"

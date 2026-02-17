@@ -53,14 +53,14 @@ func TestReadWriteConfig(t *testing.T) {
 	}
 
 	// Test WriteConfig
-	if err := WriteConfig(cfg); err != nil {
-		t.Fatalf("WriteConfig failed: %v", err)
+	if writeErr := WriteConfig(cfg); writeErr != nil {
+		t.Fatalf("WriteConfig failed: %v", writeErr)
 	}
 
 	// Test ReadConfig
-	got, err := ReadConfig()
-	if err != nil {
-		t.Fatalf("ReadConfig failed: %v", err)
+	got, readErr := ReadConfig()
+	if readErr != nil {
+		t.Fatalf("ReadConfig failed: %v", readErr)
 	}
 
 	if got.ServerURL != cfg.ServerURL || got.Token != cfg.Token || got.Username != cfg.Username || got.Password != cfg.Password {
@@ -85,8 +85,8 @@ func TestConfigEnvOverride(t *testing.T) {
 		Token:     "test-token",
 	}
 
-	if err := WriteConfig(cfg); err != nil {
-		t.Fatal(err)
+	if writeErr := WriteConfig(cfg); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 
 	// Set env vars
@@ -95,9 +95,9 @@ func TestConfigEnvOverride(t *testing.T) {
 	defer os.Unsetenv("PLEX_SERVER")
 	defer os.Unsetenv("PLEX_TOKEN")
 
-	got, err := ReadConfig()
-	if err != nil {
-		t.Fatal(err)
+	got, readErr := ReadConfig()
+	if readErr != nil {
+		t.Fatal(readErr)
 	}
 
 	if got.ServerURL != "http://env-server:32400" {
