@@ -40,6 +40,8 @@ type CLI struct {
 	Quality      cmd.QualityCheckCmd     `cmd:"" name:"quality-check" help:"Check video quality (resolution, HDR)"`
 	Metadata     cmd.MetadataMissingCmd  `cmd:"" name:"metadata-missing" help:"Find items with incomplete metadata"`
 	Search       cmd.SearchCmd           `cmd:"" help:"Search the Plex library"`
+	Libraries    cmd.LibrariesCmd        `cmd:"" help:"List library sections"`
+	ServerInfo   cmd.ServerInfoCmd       `cmd:"" name:"server-info" help:"Show Plex server and library summary information"`
 	Playlist     cmd.PlaylistCmd         `cmd:"" help:"Manage playlists"`
 	Episodes     cmd.EpisodesListCmd     `cmd:"" help:"List episodes for a show with optional filtering"`
 	Movies       cmd.MoviesCmd           `cmd:"" help:"List movies with optional filtering (e.g., by director)"`
@@ -136,6 +138,8 @@ func applyOutputFormat(cli *CLI, format string) {
 	cli.Quality.Output = format
 	cli.Metadata.Output = format
 	cli.Search.Output = format
+	cli.Libraries.Output = format
+	cli.ServerInfo.Output = format
 	cli.Playlist.List.Output = format
 	cli.Playlist.Create.Output = format
 	cli.Playlist.Smart.Output = format
