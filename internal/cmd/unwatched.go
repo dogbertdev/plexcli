@@ -35,22 +35,7 @@ func (c *UnwatchedCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) erro
 	}
 	defer cc.Cancel()
 
-	var items []*components.Metadata
-	if c.Section != "" {
-		items, err = cc.Client.GetAllLibraryItems(cc.Ctx, c.Section)
-	} else {
-		sections, sectionsErr := cc.Client.GetSections(cc.Ctx)
-		if sectionsErr != nil {
-			return fmt.Errorf("failed to get sections: %w", sectionsErr)
-		}
-		for _, section := range sections {
-			sectionItems, sectionErr := cc.Client.GetAllLibraryItems(cc.Ctx, section.ID)
-			if sectionErr != nil {
-				return fmt.Errorf("failed to get items from section %s: %w", section.ID, sectionErr)
-			}
-			items = append(items, sectionItems...)
-		}
-	}
+	items, err := fetchLibraryItems(cc.Ctx, cc.Client, c.Section)
 	if err != nil {
 		return fmt.Errorf("failed to fetch library items: %w", err)
 	}

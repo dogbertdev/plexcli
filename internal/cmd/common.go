@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/LukeHagar/plexgo/models/components"
+
 	"github.com/dogbertdev/plexcli/internal/auth"
 	"github.com/dogbertdev/plexcli/internal/config"
 	"github.com/dogbertdev/plexcli/internal/plexclient"
@@ -54,4 +56,39 @@ func NewClientContext(cfg *config.Config) (*ClientContext, error) {
 		Cancel:  cancel,
 		Timeout: timeout,
 	}, nil
+}
+
+func fetchLibraryItems(ctx context.Context, client *plexclient.Client, sectionID string) ([]*components.Metadata, error) {
+	if sectionID != "" {
+		return client.GetAllLibraryItems(ctx, sectionID)
+	}
+
+	sections, err := client.GetSections(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sections: %w", err)
+	}
+
+	var allItems []*components.Metadata
+	for _, section := range sections {
+		items, err := client.GetAllLibraryItems(ctx, section.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get items from section %s: %w", section.ID, err)
+		}
+		allItems = append(allItems, items...)
+	}
+
+	return allItems, nil
+}
+
+func forEachStream(item *components.Metadata, visitor func(media *components.Media, stream *components.Stream)) {
+	for mediaIndex := range item.Media {
+		media := &item.Media[mediaIndex]
+		for partIndex := range media.Part {
+			part := &media.Part[partIndex]
+			for streamIndex := range part.Stream {
+				stream := &part.Stream[streamIndex]
+				visitor(media, stream)
+			}
+		}
+	}
 }

@@ -56,25 +56,7 @@ func (c *MetadataMissingCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config
 }
 
 func (c *MetadataMissingCmd) fetchItems(ctx context.Context, client *plexclient.Client) ([]*components.Metadata, error) {
-	if c.Section != "" {
-		return client.GetAllLibraryItems(ctx, c.Section)
-	}
-
-	sections, err := client.GetSections(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get sections: %w", err)
-	}
-
-	var allItems []*components.Metadata
-	for _, section := range sections {
-		items, err := client.GetAllLibraryItems(ctx, section.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get items from section %s: %w", section.ID, err)
-		}
-		allItems = append(allItems, items...)
-	}
-
-	return allItems, nil
+	return fetchLibraryItems(ctx, client, c.Section)
 }
 
 func (c *MetadataMissingCmd) checkMetadata(items []*components.Metadata) []MetadataInfo {

@@ -84,60 +84,67 @@ func (c *FilePathsCmd) outputResults(w io.Writer, filePaths []FilePathInfo) erro
 }
 
 func (c *FilePathsCmd) fetchItems(ctx context.Context, client *plexclient.Client) ([]fileItemWithSection, error) {
-	var items []fileItemWithSection
+	sections, err := client.GetSections(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch sections: %w", err)
+	}
 
-	if c.Section != "" {
-		sections, err := client.GetSections(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch sections: %w", err)
+	sectionNameByID := make(map[string]string, len(sections))
+	for _, section := range sections {
+		if section.Title != nil {
+			sectionNameByID[section.ID] = *section.Title
 		}
-		sectionName := c.Section
-		for _, s := range sections {
-			if s.ID == c.Section && s.Title != nil {
-				sectionName = *s.Title
-				break
+	}
+
+	targetSectionIDs := c.targetSectionIDs(sections)
+	items := make([]fileItemWithSection, 0)
+	for _, sectionID := range targetSectionIDs {
+		sectionItems, err := client.GetAllLibraryItems(ctx, sectionID)
+		if err != nil {
+			if c.Section != "" {
+				return nil, fmt.Errorf("failed to fetch library items: %w", err)
 			}
+			continue
 		}
-		sectionItems, err := client.GetAllLibraryItems(ctx, c.Section)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch library items: %w", err)
+
+		sectionName := sectionNameByID[sectionID]
+		if sectionName == "" {
+			sectionName = sectionID
 		}
 		for _, item := range sectionItems {
 			items = append(items, fileItemWithSection{item: item, section: sectionName})
 		}
-	} else {
-		sections, err := client.GetSections(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch sections: %w", err)
-		}
-
-		for _, section := range sections {
-			sectionName := ""
-			if section.Title != nil {
-				sectionName = *section.Title
-			}
-			sectionItems, err := client.GetAllLibraryItems(ctx, section.ID)
-			if err != nil {
-				continue
-			}
-			for _, item := range sectionItems {
-				items = append(items, fileItemWithSection{item: item, section: sectionName})
-			}
-		}
 	}
 
-	if c.Title != "" {
-		filtered := make([]fileItemWithSection, 0)
-		filterLower := strings.ToLower(c.Title)
-		for _, iws := range items {
-			if strings.Contains(strings.ToLower(anyToString(iws.item.Title)), filterLower) {
-				filtered = append(filtered, iws)
-			}
-		}
-		items = filtered
+	return c.filterItemsByTitle(items), nil
+}
+
+func (c *FilePathsCmd) targetSectionIDs(sections []plexclient.Library) []string {
+	if c.Section != "" {
+		return []string{c.Section}
 	}
 
-	return items, nil
+	sectionIDs := make([]string, 0, len(sections))
+	for _, section := range sections {
+		sectionIDs = append(sectionIDs, section.ID)
+	}
+	return sectionIDs
+}
+
+func (c *FilePathsCmd) filterItemsByTitle(items []fileItemWithSection) []fileItemWithSection {
+	if c.Title == "" {
+		return items
+	}
+
+	filterTitle := strings.ToLower(c.Title)
+	filtered := make([]fileItemWithSection, 0, len(items))
+	for _, itemWithSection := range items {
+		title := strings.ToLower(anyToString(itemWithSection.item.Title))
+		if strings.Contains(title, filterTitle) {
+			filtered = append(filtered, itemWithSection)
+		}
+	}
+	return filtered
 }
 
 func (c *FilePathsCmd) extractFilePaths(items []fileItemWithSection) []FilePathInfo {

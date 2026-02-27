@@ -63,25 +63,7 @@ func (c *AudioCheckCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) err
 }
 
 func (c *AudioCheckCmd) fetchItems(ctx context.Context, client *plexclient.Client) ([]*components.Metadata, error) {
-	if c.Section != "" {
-		return client.GetAllLibraryItems(ctx, c.Section)
-	}
-
-	sections, err := client.GetSections(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get sections: %w", err)
-	}
-
-	var allItems []*components.Metadata
-	for _, section := range sections {
-		items, err := client.GetAllLibraryItems(ctx, section.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get items from section %s: %w", section.ID, err)
-		}
-		allItems = append(allItems, items...)
-	}
-
-	return allItems, nil
+	return fetchLibraryItems(ctx, client, c.Section)
 }
 
 func (c *AudioCheckCmd) checkAudio(items []*components.Metadata, requestedCodecs []string) []AudioInfo {
@@ -108,34 +90,27 @@ func (c *AudioCheckCmd) extractAudioInfo(item *components.Metadata) []AudioInfo 
 	var infos []AudioInfo
 	title := audioGetTitle(item)
 	year := int64PtrToInt(item.Year)
+	itemType := anyToString(item.Type)
 
-	if item.Media != nil {
-		for _, media := range item.Media {
-			if media.Part != nil {
-				for _, part := range media.Part {
-					if part.Stream != nil {
-						for _, stream := range part.Stream {
-							// StreamType 2 = audio
-							if stream.StreamType != nil && *stream.StreamType == 2 {
-								info := AudioInfo{
-									Title: title,
-									Year:  year,
-									Type:  anyToString(item.Type),
-								}
-
-								info.Codec = anyToString(stream.Codec)
-								if media.AudioChannels != nil {
-									info.Channels = int(*media.AudioChannels)
-								}
-
-								infos = append(infos, info)
-							}
-						}
-					}
-				}
-			}
+	forEachStream(item, func(media *components.Media, stream *components.Stream) {
+		// StreamType 2 = audio
+		if stream.StreamType == nil || *stream.StreamType != 2 {
+			return
 		}
-	}
+
+		info := AudioInfo{
+			Title: title,
+			Year:  year,
+			Type:  itemType,
+			Codec: anyToString(stream.Codec),
+		}
+
+		if media.AudioChannels != nil {
+			info.Channels = int(*media.AudioChannels)
+		}
+
+		infos = append(infos, info)
+	})
 
 	return infos
 }

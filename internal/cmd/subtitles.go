@@ -63,25 +63,7 @@ func (c *SubtitlesMissingCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Confi
 }
 
 func (c *SubtitlesMissingCmd) fetchItems(ctx context.Context, client *plexclient.Client) ([]*components.Metadata, error) {
-	if c.Section != "" {
-		return client.GetAllLibraryItems(ctx, c.Section)
-	}
-
-	sections, err := client.GetSections(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get sections: %w", err)
-	}
-
-	var allItems []*components.Metadata
-	for _, section := range sections {
-		items, err := client.GetAllLibraryItems(ctx, section.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get items from section %s: %w", section.ID, err)
-		}
-		allItems = append(allItems, items...)
-	}
-
-	return allItems, nil
+	return fetchLibraryItems(ctx, client, c.Section)
 }
 
 func (c *SubtitlesMissingCmd) checkSubtitles(ctx context.Context, items []*components.Metadata, client *plexclient.Client, requestedLangs []string) []SubtitleInfo {
@@ -128,28 +110,22 @@ func (c *SubtitlesMissingCmd) extractSubtitleInfo(item *components.Metadata, req
 
 	availableLangs := make(map[string]bool)
 
-	if item.Media != nil {
-		for _, media := range item.Media {
-			if media.Part != nil {
-				for _, part := range media.Part {
-					if part.Stream != nil {
-						for _, stream := range part.Stream {
-							// StreamType 3 = subtitles
-							if stream.StreamType != nil && *stream.StreamType == 3 {
-								lang := anyToString(stream.LanguageCode)
-								if lang == "" {
-									lang = anyToString(stream.Language)
-								}
-								if lang != "" {
-									availableLangs[strings.ToLower(lang)] = true
-								}
-							}
-						}
-					}
-				}
-			}
+	forEachStream(item, func(_ *components.Media, stream *components.Stream) {
+		// StreamType 3 = subtitles
+		if stream.StreamType == nil || *stream.StreamType != 3 {
+			return
 		}
-	}
+
+		lang := anyToString(stream.LanguageCode)
+		if lang == "" {
+			lang = anyToString(stream.Language)
+		}
+		if lang == "" {
+			return
+		}
+
+		availableLangs[strings.ToLower(lang)] = true
+	})
 
 	for lang := range availableLangs {
 		info.AvailableSubs = append(info.AvailableSubs, lang)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"time"
 
 	"github.com/LukeHagar/plexgo/models/components"
@@ -113,10 +114,14 @@ func (c *RecentlyAddedCmd) processItems(items []itemWithSection) []RecentlyAdded
 		}
 
 		results = append(results, result)
+	}
 
-		if c.Limit > 0 && len(results) >= c.Limit {
-			break
-		}
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].AddedAt.After(results[j].AddedAt)
+	})
+
+	if c.Limit > 0 && len(results) > c.Limit {
+		results = results[:c.Limit]
 	}
 
 	return results

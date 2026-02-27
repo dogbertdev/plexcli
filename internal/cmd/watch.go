@@ -124,29 +124,17 @@ func (c *WatchHistoryCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) e
 
 	// Get accounts for user name lookup
 	accounts, _ := cc.Client.GetAccounts(cc.Ctx)
-	accountMap := make(map[int]string)
-	for _, a := range accounts {
-		accountMap[a.ID] = a.Name
-	}
+	accountNameByID := buildAccountNameByID(accounts)
 
 	cutoff := time.Now().AddDate(0, 0, -c.Days)
 	var filtered []HistoryItem
 
 	for _, h := range history {
-		// Filter by date
-		if h.ViewedAt.Before(cutoff) {
+		if !watchHistoryMatchesFilters(h, cutoff, c.Type) {
 			continue
 		}
 
-		// Filter by type
-		if c.Type != "all" && h.Type != c.Type {
-			continue
-		}
-
-		userName := accountMap[h.AccountID]
-		if userName == "" {
-			userName = fmt.Sprintf("Account %d", h.AccountID)
-		}
+		userName := accountDisplayName(accountNameByID, h.AccountID)
 
 		// Filter by user
 		if c.User != "" && userName != c.User {
@@ -220,10 +208,7 @@ func (c *WatchStatsCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) err
 
 	// Get accounts for user name lookup
 	accounts, _ := cc.Client.GetAccounts(cc.Ctx)
-	accountMap := make(map[int]string)
-	for _, a := range accounts {
-		accountMap[a.ID] = a.Name
-	}
+	accountNameByID := buildAccountNameByID(accounts)
 
 	cutoff := time.Now().AddDate(0, 0, -c.Days)
 
@@ -231,13 +216,7 @@ func (c *WatchStatsCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) err
 	counts := make(map[string]*WatchStat)
 
 	for _, h := range history {
-		// Filter by date
-		if h.ViewedAt.Before(cutoff) {
-			continue
-		}
-
-		// Filter by type
-		if c.Type != "all" && h.Type != c.Type {
+		if !watchHistoryMatchesFilters(h, cutoff, c.Type) {
 			continue
 		}
 
@@ -247,10 +226,7 @@ func (c *WatchStatsCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) err
 
 		switch c.By {
 		case "user":
-			userName := accountMap[h.AccountID]
-			if userName == "" {
-				userName = fmt.Sprintf("Account %d", h.AccountID)
-			}
+			userName := accountDisplayName(accountNameByID, h.AccountID)
 			key = fmt.Sprintf("user:%d", h.AccountID)
 			name = userName
 			itemType = "user"
@@ -304,6 +280,32 @@ func (c *WatchStatsCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) err
 	}
 
 	return c.outputResults(u.Out(), stats)
+}
+
+func buildAccountNameByID(accounts []plexclient.Account) map[int]string {
+	accountNameByID := make(map[int]string, len(accounts))
+	for _, account := range accounts {
+		accountNameByID[account.ID] = account.Name
+	}
+	return accountNameByID
+}
+
+func accountDisplayName(accountNameByID map[int]string, accountID int) string {
+	accountName := accountNameByID[accountID]
+	if accountName != "" {
+		return accountName
+	}
+	return fmt.Sprintf("Account %d", accountID)
+}
+
+func watchHistoryMatchesFilters(historyEntry plexclient.HistoryEntry, cutoff time.Time, mediaType string) bool {
+	if historyEntry.ViewedAt.Before(cutoff) {
+		return false
+	}
+	if mediaType != "all" && historyEntry.Type != mediaType {
+		return false
+	}
+	return true
 }
 
 func (c *WatchStatsCmd) outputResults(w io.Writer, stats []WatchStat) error {
