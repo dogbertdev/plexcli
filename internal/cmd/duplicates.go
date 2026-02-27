@@ -44,24 +44,9 @@ func (c *DuplicatesCmd) Run(ctx *kong.Context, ui *ui.UI, cfg *config.Config) er
 	}
 	defer cc.Cancel()
 
-	var items []*components.Metadata
-	if c.SectionID != "" {
-		items, err = cc.Client.GetAllLibraryItems(cc.Ctx, c.SectionID)
-		if err != nil {
-			return fmt.Errorf("failed to fetch library items: %w", err)
-		}
-	} else {
-		sections, err := cc.Client.GetSections(cc.Ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get sections: %w", err)
-		}
-		for _, section := range sections {
-			sectionItems, err := cc.Client.GetAllLibraryItems(cc.Ctx, section.ID)
-			if err != nil {
-				return fmt.Errorf("failed to get items from section %s: %w", section.ID, err)
-			}
-			items = append(items, sectionItems...)
-		}
+	items, err := fetchLibraryItems(cc.Ctx, cc.Client, c.SectionID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch library items: %w", err)
 	}
 
 	duplicates := c.findDuplicates(items)
