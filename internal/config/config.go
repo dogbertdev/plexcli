@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 
 	"github.com/yosuke-furukawa/json5/encoding/json5"
 )
@@ -18,11 +20,14 @@ const (
 
 // Config represents the application configuration.
 type Config struct {
-	ServerURL string `json:"server_url"`
-	Token     string `json:"token"`
-	Username  string `json:"username"`
-	Password  string `json:"password"`
-	Timeout   int    `json:"timeout"`
+	ServerURL     string `json:"server_url"`
+	Token         string `json:"token"`
+	Username      string `json:"username"`
+	Password      string `json:"password"`
+	Timeout       int    `json:"timeout"`
+	CacheTTL      int    `json:"cache_ttl"`
+	CacheDisabled bool   `json:"-"`
+	CacheRefresh  bool   `json:"-"`
 }
 
 func ConfigPath() (string, error) {
@@ -85,6 +90,24 @@ func ReadConfig() (*Config, error) {
 	}
 	if val := os.Getenv("PLEX_PASSWORD"); val != "" {
 		cfg.Password = val
+	}
+	if val := os.Getenv("PLEX_CACHE_TTL"); val != "" {
+		ttl, parseErr := strconv.Atoi(strings.TrimSpace(val))
+		if parseErr == nil {
+			cfg.CacheTTL = ttl
+		}
+	}
+	if val := os.Getenv("PLEX_NO_CACHE"); val != "" {
+		disable, parseErr := strconv.ParseBool(strings.TrimSpace(val))
+		if parseErr == nil {
+			cfg.CacheDisabled = disable
+		}
+	}
+	if val := os.Getenv("PLEX_REFRESH_CACHE"); val != "" {
+		refresh, parseErr := strconv.ParseBool(strings.TrimSpace(val))
+		if parseErr == nil {
+			cfg.CacheRefresh = refresh
+		}
 	}
 
 	return cfg, nil
