@@ -43,6 +43,9 @@ The CLI supports configuration through:
    - `PLEX_TOKEN` - Your Plex authentication token
    - `PLEX_USERNAME` - Your Plex username (for authentication)
    - `PLEX_PASSWORD` - Your Plex password (for authentication)
+   - `PLEX_CACHE_TTL` - Local library cache TTL in seconds (default: `300`, `0` disables cache)
+   - `PLEX_NO_CACHE` - Disable local library cache (`true` or `false`)
+   - `PLEX_REFRESH_CACHE` - Bypass cache reads and refresh from Plex (`true` or `false`)
 
 2. **Config File** (~/.config/plexcli/config.json):
    ```json
@@ -77,9 +80,20 @@ plex --help
 - `--config PATH` - Path to config file
 - `--server URL` - Plex server URL
 - `--token TOKEN` - Plex authentication token
+- `--timeout SECONDS` - Request timeout in seconds (default: `120`)
+- `--cache-ttl SECONDS` - Local library cache TTL in seconds (default: `300`, `0` disables cache)
+- `--no-cache` - Disable local library cache for this run
+- `--refresh-cache` - Bypass cache reads and refresh local cache for this run
 - `-v, --version` - Show version
 
 ### Commands
+
+#### Manage Cache
+
+```bash
+# Clear local library cache
+plex cache clear
+```
 
 #### List Unwatched Items
 

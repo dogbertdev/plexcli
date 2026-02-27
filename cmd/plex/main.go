@@ -20,13 +20,16 @@ type CLI struct {
 	Version bool `help:"Show version information" short:"v"`
 
 	// Global flags
-	JSON    bool   `help:"Output JSON to stdout" default:"false"`
-	Plain   bool   `help:"Output TSV to stdout" default:"false"`
-	Color   string `help:"Color mode: auto|always|never" default:"auto" enum:"auto,always,never"`
-	Config  string `help:"Path to config file" type:"path" default:""`
-	Server  string `help:"Plex server URL" env:"PLEX_SERVER" default:""`
-	Token   string `help:"Plex authentication token" env:"PLEX_TOKEN" default:""`
-	Timeout int    `help:"Request timeout in seconds" default:"120"`
+	JSON         bool   `help:"Output JSON to stdout" default:"false"`
+	Plain        bool   `help:"Output TSV to stdout" default:"false"`
+	Color        string `help:"Color mode: auto|always|never" default:"auto" enum:"auto,always,never"`
+	Config       string `help:"Path to config file" type:"path" default:""`
+	Server       string `help:"Plex server URL" env:"PLEX_SERVER" default:""`
+	Token        string `help:"Plex authentication token" env:"PLEX_TOKEN" default:""`
+	Timeout      int    `help:"Request timeout in seconds" default:"120"`
+	CacheTTL     int    `help:"Library cache TTL in seconds (0 disables cache)" env:"PLEX_CACHE_TTL" default:"300"`
+	NoCache      bool   `help:"Disable local library cache for this run" env:"PLEX_NO_CACHE" default:"false"`
+	RefreshCache bool   `help:"Bypass cache reads and refresh local cache for this run" env:"PLEX_REFRESH_CACHE" default:"false"`
 
 	// Subcommands
 	Unwatched    cmd.UnwatchedCmd        `cmd:"" help:"List unwatched items in the library"`
@@ -50,6 +53,7 @@ type CLI struct {
 	Editions     cmd.EditionsCmd         `cmd:"" help:"List movies with editions and check for issues"`
 	Streams      cmd.StreamsCmd          `cmd:"" help:"Manage audio and subtitle streams"`
 	Watch        cmd.WatchCmd            `cmd:"" help:"View watch activity and statistics"`
+	Cache        cmd.CacheCmd            `cmd:"" help:"Manage local cache"`
 }
 
 func main() {
@@ -98,7 +102,7 @@ func main() {
 	u := ui.New(ui.Options{ColorMode: colorMode})
 
 	// Load configuration
-	cfg, err := loadConfig(cli.Config, cli.Server, cli.Token, cli.Timeout)
+	cfg, err := loadConfig(cli.Config, cli.Server, cli.Token, cli.Timeout, cli.CacheTTL, cli.NoCache, cli.RefreshCache)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		os.Exit(1)
@@ -156,10 +160,11 @@ func applyOutputFormat(cli *CLI, format string) {
 	cli.Watch.Now.Output = format
 	cli.Watch.History.Output = format
 	cli.Watch.Stats.Output = format
+	cli.Cache.Clear.Output = format
 }
 
 // loadConfig loads configuration from file and/or environment/cli flags
-func loadConfig(_, serverURL, token string, timeout int) (*config.Config, error) {
+func loadConfig(_, serverURL, token string, timeout, cacheTTL int, noCache, refreshCache bool) (*config.Config, error) {
 	cfg, err := config.ReadConfig()
 	if err != nil {
 		cfg = &config.Config{}
@@ -174,6 +179,9 @@ func loadConfig(_, serverURL, token string, timeout int) (*config.Config, error)
 	if timeout > 0 {
 		cfg.Timeout = timeout
 	}
+	cfg.CacheTTL = cacheTTL
+	cfg.CacheDisabled = noCache || cacheTTL == 0
+	cfg.CacheRefresh = refreshCache
 
 	return cfg, nil
 }
