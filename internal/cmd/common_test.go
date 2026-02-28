@@ -57,4 +57,3 @@ func TestForEachStream_VisitsAllStreams(t *testing.T) {
 		t.Fatalf("expected 1 subtitle stream, got %d", subtitleSeen)
 	}
 }
-

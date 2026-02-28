@@ -47,4 +47,3 @@ func TestWatchHistoryMatchesFilters(t *testing.T) {
 		t.Fatal("expected episode to match episode filter")
 	}
 }
-

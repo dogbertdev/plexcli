@@ -65,7 +65,7 @@ func TestAudioCheckCmd_checkAudio_FilterByType(t *testing.T) {
 			Media: []components.Media{
 				{
 					AudioChannels: &channels,
-					Part: []components.Part{{Stream: []components.Stream{{StreamType: &audioType, Codec: "aac"}}}},
+					Part:          []components.Part{{Stream: []components.Stream{{StreamType: &audioType, Codec: "aac"}}}},
 				},
 			},
 		},
@@ -76,7 +76,7 @@ func TestAudioCheckCmd_checkAudio_FilterByType(t *testing.T) {
 			Media: []components.Media{
 				{
 					AudioChannels: &channels,
-					Part: []components.Part{{Stream: []components.Stream{{StreamType: &audioType, Codec: "aac"}}}},
+					Part:          []components.Part{{Stream: []components.Stream{{StreamType: &audioType, Codec: "aac"}}}},
 				},
 			},
 		},
@@ -91,4 +91,3 @@ func TestAudioCheckCmd_checkAudio_FilterByType(t *testing.T) {
 		t.Fatalf("expected result type movie, got %q", results[0].Type)
 	}
 }
-
