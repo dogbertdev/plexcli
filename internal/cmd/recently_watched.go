@@ -49,10 +49,6 @@ func (c *RecentlyWatchedCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config
 		return nil
 	}
 
-	if c.Limit > 0 && len(processed) > c.Limit {
-		processed = processed[:c.Limit]
-	}
-
 	return c.output(u.Out(), processed)
 }
 
@@ -67,51 +63,15 @@ func (c *RecentlyWatchedCmd) fetchHistory(ctx context.Context, client *plexclien
 
 func (c *RecentlyWatchedCmd) processHistory(ctx context.Context, history []plexclient.HistoryItem, client *plexclient.Client) []RecentlyWatchedItem {
 	var items []RecentlyWatchedItem
-	cutoffTime := time.Time{}
+	cutoffTime := c.cutoffTime()
 
-	if c.Days > 0 {
-		cutoffTime = time.Now().AddDate(0, 0, -c.Days)
-	}
-
-	var sections []plexclient.Library
-	if len(history) > 0 && client != nil {
-		sections, _ = client.GetSections(ctx)
-	}
+	sectionNameByID := c.sectionNameByID(ctx, history, client)
 
 	for _, h := range history {
-		if !c.matchesType(h.Type) {
+		item, include := c.toRecentlyWatchedItem(h, cutoffTime, sectionNameByID)
+		if !include {
 			continue
 		}
-
-		watchedAt := time.Unix(h.ViewedAt, 0)
-		if c.Days > 0 && watchedAt.Before(cutoffTime) {
-			continue
-		}
-
-		item := RecentlyWatchedItem{
-			Title:     c.formatTitle(h),
-			Type:      h.Type,
-			WatchedAt: watchedAt,
-		}
-
-		libraryID := ""
-		if h.LibrarySectionID != nil {
-			libraryID = *h.LibrarySectionID
-		}
-
-		if libraryID != "" {
-			for _, section := range sections {
-				if section.ID == libraryID && section.Title != nil {
-					item.Library = *section.Title
-					break
-				}
-			}
-		}
-
-		if item.Library == "" {
-			item.Library = "unknown"
-		}
-
 		items = append(items, item)
 	}
 
@@ -124,6 +84,64 @@ func (c *RecentlyWatchedCmd) processHistory(ctx context.Context, history []plexc
 	}
 
 	return items
+}
+
+func (c *RecentlyWatchedCmd) cutoffTime() time.Time {
+	if c.Days <= 0 {
+		return time.Time{}
+	}
+	return time.Now().AddDate(0, 0, -c.Days)
+}
+
+func (c *RecentlyWatchedCmd) toRecentlyWatchedItem(historyItem plexclient.HistoryItem, cutoffTime time.Time, sectionNameByID map[string]string) (RecentlyWatchedItem, bool) {
+	if !c.matchesType(historyItem.Type) {
+		return RecentlyWatchedItem{}, false
+	}
+
+	watchedAt := time.Unix(historyItem.ViewedAt, 0)
+	if !cutoffTime.IsZero() && watchedAt.Before(cutoffTime) {
+		return RecentlyWatchedItem{}, false
+	}
+
+	library := sectionNameByID[historyLibraryID(historyItem)]
+	if library == "" {
+		library = "unknown"
+	}
+
+	return RecentlyWatchedItem{
+		Title:     c.formatTitle(historyItem),
+		Type:      historyItem.Type,
+		Library:   library,
+		WatchedAt: watchedAt,
+	}, true
+}
+
+func (c *RecentlyWatchedCmd) sectionNameByID(ctx context.Context, history []plexclient.HistoryItem, client *plexclient.Client) map[string]string {
+	if len(history) == 0 || client == nil {
+		return nil
+	}
+
+	sections, err := client.GetSections(ctx)
+	if err != nil {
+		return nil
+	}
+
+	sectionNameByID := make(map[string]string, len(sections))
+	for _, section := range sections {
+		if section.Title != nil && *section.Title != "" {
+			sectionNameByID[section.ID] = *section.Title
+		}
+	}
+
+	return sectionNameByID
+}
+
+func historyLibraryID(item plexclient.HistoryItem) string {
+	if item.LibrarySectionID == nil {
+		return ""
+	}
+
+	return *item.LibrarySectionID
 }
 
 func (c *RecentlyWatchedCmd) formatTitle(h plexclient.HistoryItem) string {

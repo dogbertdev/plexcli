@@ -131,6 +131,33 @@ func TestSubtitlesMissingCmd_extractSubtitleInfo_withMissing(t *testing.T) {
 	}
 }
 
+func TestSubtitlesMissingCmd_extractSubtitleInfo_UsesLanguageFallback(t *testing.T) {
+	cmd := &SubtitlesMissingCmd{}
+	item := &components.Metadata{
+		Title: "Fallback Language",
+		Type:  "movie",
+		Media: []components.Media{
+			{
+				Part: []components.Part{
+					{
+						Stream: []components.Stream{
+							{StreamType: subtitleInt64Ptr(3), Language: "eng"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := cmd.extractSubtitleInfo(item, []string{"en"})
+	if len(result.MissingSubs) != 0 {
+		t.Fatalf("expected no missing subtitles, got %v", result.MissingSubs)
+	}
+	if len(result.AvailableSubs) != 1 || result.AvailableSubs[0] != "eng" {
+		t.Fatalf("expected available subtitle eng, got %v", result.AvailableSubs)
+	}
+}
+
 func TestSubtitlesMissingCmd_extractSubtitleInfo_filterByType(t *testing.T) {
 	items := []*components.Metadata{
 		{

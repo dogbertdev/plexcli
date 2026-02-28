@@ -220,20 +220,29 @@ func (c *StreamsSetCmd) findShow(ctx context.Context, client *plexclient.Client)
 		return "", fmt.Errorf("failed to search for show: %w", err)
 	}
 
-	for _, r := range results {
-		if r.Type == "show" && strings.EqualFold(r.Title, c.Show) {
-			return r.RatingKey, nil
-		}
-	}
-
-	// Partial match
-	for _, r := range results {
-		if r.Type == "show" && strings.Contains(strings.ToLower(r.Title), strings.ToLower(c.Show)) {
-			return r.RatingKey, nil
-		}
+	match, found := pickShowMatch(results, c.Show)
+	if found {
+		return match.RatingKey, nil
 	}
 
 	return "", fmt.Errorf("show not found: %s", c.Show)
+}
+
+func pickShowMatch(results []plexclient.SearchResult, query string) (plexclient.SearchResult, bool) {
+	for _, result := range results {
+		if result.Type == "show" && strings.EqualFold(result.Title, query) {
+			return result, true
+		}
+	}
+
+	queryLower := strings.ToLower(query)
+	for _, result := range results {
+		if result.Type == "show" && strings.Contains(strings.ToLower(result.Title), queryLower) {
+			return result, true
+		}
+	}
+
+	return plexclient.SearchResult{}, false
 }
 
 func findStreamByLanguage(streams []plexclient.StreamInfo, streamType int, langCode string) int {

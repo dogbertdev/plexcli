@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/LukeHagar/plexgo/models/components"
+
+	"github.com/dogbertdev/plexcli/internal/plexclient"
 )
 
 func TestFormatSize(t *testing.T) {
@@ -149,5 +151,40 @@ func TestFilePathInfo_Struct(t *testing.T) {
 
 	if info.Size != 1024 {
 		t.Errorf("Expected size 1024, got %d", info.Size)
+	}
+}
+
+func TestFilePathsCmd_targetSectionIDs(t *testing.T) {
+	cmd := &FilePathsCmd{}
+	sections := []plexclient.Library{
+		{ID: "1"},
+		{ID: "2"},
+	}
+
+	ids := cmd.targetSectionIDs(sections)
+	if len(ids) != 2 || ids[0] != "1" || ids[1] != "2" {
+		t.Fatalf("expected [1 2], got %v", ids)
+	}
+
+	cmd.Section = "9"
+	ids = cmd.targetSectionIDs(sections)
+	if len(ids) != 1 || ids[0] != "9" {
+		t.Fatalf("expected [9], got %v", ids)
+	}
+}
+
+func TestFilePathsCmd_filterItemsByTitle(t *testing.T) {
+	cmd := &FilePathsCmd{Title: "demon"}
+	items := []fileItemWithSection{
+		{item: &components.Metadata{Title: "Demon Slayer"}, section: "Anime"},
+		{item: &components.Metadata{Title: "Breaking Bad"}, section: "TV"},
+	}
+
+	filtered := cmd.filterItemsByTitle(items)
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 filtered item, got %d", len(filtered))
+	}
+	if filtered[0].item.Title != "Demon Slayer" {
+		t.Fatalf("unexpected filtered title %q", filtered[0].item.Title)
 	}
 }
