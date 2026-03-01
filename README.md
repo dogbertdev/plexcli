@@ -201,6 +201,19 @@ plex quality-check --min-resolution 4k --hdr
 plex metadata-missing
 ```
 
+#### Manage Audio and Subtitle Streams
+
+```bash
+# Set streams for one season
+plex streams set "Demon Slayer" --season 1 --audio japanese --subtitle "full english"
+
+# Set streams for all episodes in all seasons
+plex streams set "Demon Slayer" --all-seasons --audio japanese --subtitle "full english"
+
+# Preview changes without modifying Plex
+plex streams set "Demon Slayer" --all-seasons --audio japanese --subtitle "full english" --dry-run
+```
+
 ## Development
 
 ### Prerequisites
