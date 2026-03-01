@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/alecthomas/kong"
 
@@ -102,7 +103,22 @@ func main() {
 	u := ui.New(ui.Options{ColorMode: colorMode})
 
 	// Load configuration
-	cfg, err := loadConfig(cli.Config, cli.Server, cli.Token, cli.Timeout, cli.CacheTTL, cli.NoCache, cli.RefreshCache)
+	cacheTTLSet := hasCLIFlag(os.Args[1:], "cache-ttl")
+	noCacheSet := hasCLIFlag(os.Args[1:], "no-cache")
+	refreshCacheSet := hasCLIFlag(os.Args[1:], "refresh-cache")
+
+	cfg, err := loadConfig(
+		cli.Config,
+		cli.Server,
+		cli.Token,
+		cli.Timeout,
+		cli.CacheTTL,
+		cli.NoCache,
+		cli.RefreshCache,
+		cacheTTLSet,
+		noCacheSet,
+		refreshCacheSet,
+	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		os.Exit(1)
@@ -164,7 +180,13 @@ func applyOutputFormat(cli *CLI, format string) {
 }
 
 // loadConfig loads configuration from file and/or environment/cli flags
-func loadConfig(_, serverURL, token string, timeout, cacheTTL int, noCache, refreshCache bool) (*config.Config, error) {
+func loadConfig(
+	_ string,
+	serverURL, token string,
+	timeout, cacheTTL int,
+	noCache, refreshCache bool,
+	cacheTTLSet, noCacheSet, refreshCacheSet bool,
+) (*config.Config, error) {
 	cfg, err := config.ReadConfig()
 	if err != nil {
 		cfg = &config.Config{}
@@ -179,9 +201,28 @@ func loadConfig(_, serverURL, token string, timeout, cacheTTL int, noCache, refr
 	if timeout > 0 {
 		cfg.Timeout = timeout
 	}
-	cfg.CacheTTL = cacheTTL
-	cfg.CacheDisabled = noCache || cacheTTL == 0
-	cfg.CacheRefresh = refreshCache
+	if cacheTTLSet {
+		cfg.CacheTTL = cacheTTL
+		if cacheTTL == 0 {
+			cfg.CacheDisabled = true
+		}
+	}
+	if noCacheSet {
+		cfg.CacheDisabled = noCache
+	}
+	if refreshCacheSet {
+		cfg.CacheRefresh = refreshCache
+	}
 
 	return cfg, nil
+}
+
+func hasCLIFlag(args []string, name string) bool {
+	prefix := "--" + name
+	for _, arg := range args {
+		if arg == prefix || strings.HasPrefix(arg, prefix+"=") {
+			return true
+		}
+	}
+	return false
 }

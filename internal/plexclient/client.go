@@ -259,9 +259,6 @@ func (c *Client) GetAllLibraryItems(ctx context.Context, sectionID string) ([]*c
 
 			return nil
 		})
-		if err == nil {
-			_ = c.saveLibrarySectionToCache(sectionID, body)
-		}
 	}
 
 	if err != nil {
@@ -279,6 +276,10 @@ func (c *Client) GetAllLibraryItems(ctx context.Context, sectionID string) ([]*c
 			Section: sectionID,
 			Err:     fmt.Errorf("failed to unmarshal response: %w", err),
 		}
+	}
+
+	if !cacheHit {
+		_ = c.saveLibrarySectionToCache(sectionID, body)
 	}
 
 	allItems := make([]*components.Metadata, 0, len(rawResp.MediaContainer.Metadata))
