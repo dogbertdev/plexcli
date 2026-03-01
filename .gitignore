@@ -31,3 +31,6 @@ references/
 
 # Planning docs (internal use only)
 docs/planning/
+
+# Private local journal
+.private-journal/
