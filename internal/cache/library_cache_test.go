@@ -16,8 +16,8 @@ func TestLibraryPayloadCache_SaveAndLoad(t *testing.T) {
 	}
 
 	payload := []byte(`{"MediaContainer":{"Metadata":[{"title":"Example"}]}}`)
-	if err := cache.Save("section-key", payload); err != nil {
-		t.Fatalf("Save() error = %v", err)
+	if saveErr := cache.Save("section-key", payload); saveErr != nil {
+		t.Fatalf("Save() error = %v", saveErr)
 	}
 
 	got, hit, err := cache.Load("section-key", 5*time.Minute)
@@ -42,8 +42,8 @@ func TestLibraryPayloadCache_LoadMissWhenExpired(t *testing.T) {
 	}
 
 	payload := []byte(`{"MediaContainer":{"Metadata":[]}}`)
-	if err := cache.Save("expired-key", payload); err != nil {
-		t.Fatalf("Save() error = %v", err)
+	if saveErr := cache.Save("expired-key", payload); saveErr != nil {
+		t.Fatalf("Save() error = %v", saveErr)
 	}
 
 	cache.now = func() time.Time { return time.Now().Add(2 * time.Minute) }

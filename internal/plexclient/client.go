@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/LukeHagar/plexgo/models/components"
+
 	"github.com/dogbertdev/plexcli/internal/cache"
 )
 
@@ -234,16 +235,16 @@ func (c *Client) GetAllLibraryItems(ctx context.Context, sectionID string) ([]*c
 	if !cacheHit {
 		err = c.executeWithRetry(ctx, "GetAllLibraryItems", func() error {
 			url := fmt.Sprintf("%s/library/sections/%s/all?X-Plex-Container-Start=0&X-Plex-Container-Size=1000&X-Plex-Token=%s", c.serverURL, sectionID, c.token)
-			req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-			if err != nil {
-				return fmt.Errorf("failed to create request: %w", err)
+			req, reqErr := http.NewRequestWithContext(ctx, "GET", url, nil)
+			if reqErr != nil {
+				return fmt.Errorf("failed to create request: %w", reqErr)
 			}
 
 			req.Header.Set("Accept", "application/json")
 
-			resp, err := c.httpClient.Do(req)
-			if err != nil {
-				return fmt.Errorf("failed to make request: %w", err)
+			resp, doErr := c.httpClient.Do(req)
+			if doErr != nil {
+				return fmt.Errorf("failed to make request: %w", doErr)
 			}
 			defer resp.Body.Close()
 
@@ -251,9 +252,9 @@ func (c *Client) GetAllLibraryItems(ctx context.Context, sectionID string) ([]*c
 				return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 			}
 
-			body, err = io.ReadAll(resp.Body)
-			if err != nil {
-				return fmt.Errorf("failed to read response body: %w", err)
+			body, doErr = io.ReadAll(resp.Body)
+			if doErr != nil {
+				return fmt.Errorf("failed to read response body: %w", doErr)
 			}
 
 			return nil
