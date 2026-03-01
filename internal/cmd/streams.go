@@ -27,7 +27,7 @@ type StreamsListCmd struct {
 
 type StreamsSetCmd struct {
 	Show     string `arg:"" help:"Show name or rating key"`
-	Season   int    `help:"Season number (required unless --all-seasons is set)" short:"s"`
+	Season   int    `help:"Season number (required unless --all-seasons is set; use 0 for specials)" short:"s" default:"-1"`
 	All      bool   `help:"Apply to all seasons in the show" name:"all-seasons"`
 	Audio    string `help:"Audio stream to select (language code or name, e.g., 'eng', 'jpn', 'japanese')" short:"a"`
 	Subtitle string `help:"Subtitle stream to select (language/code/title, e.g., 'eng', 'full english', 'off')" short:"t"`
@@ -126,14 +126,8 @@ func (c *StreamsListCmd) outputResults(w io.Writer, streams []plexclient.StreamI
 }
 
 func (c *StreamsSetCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	if c.Audio == "" && c.Subtitle == "" {
-		return fmt.Errorf("at least one of --audio or --subtitle must be specified")
-	}
-	if !c.All && c.Season <= 0 {
-		return fmt.Errorf("specify --season or --all-seasons")
-	}
-	if c.All && c.Season > 0 {
-		return fmt.Errorf("use either --season or --all-seasons, not both")
+	if err := c.validateArgs(); err != nil {
+		return err
 	}
 
 	cc, err := NewClientContext(cfg)
@@ -226,6 +220,19 @@ func (c *StreamsSetCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) err
 	}
 
 	return c.outputResults(u.Out(), results)
+}
+
+func (c *StreamsSetCmd) validateArgs() error {
+	if c.Audio == "" && c.Subtitle == "" {
+		return fmt.Errorf("at least one of --audio or --subtitle must be specified")
+	}
+	if !c.All && c.Season < 0 {
+		return fmt.Errorf("specify --season or --all-seasons")
+	}
+	if c.All && c.Season >= 0 {
+		return fmt.Errorf("use either --season or --all-seasons, not both")
+	}
+	return nil
 }
 
 func (c *StreamsSetCmd) getTargetEpisodes(ctx context.Context, client *plexclient.Client, showKey string) ([]plexclient.EpisodeInfo, error) {
@@ -406,10 +413,32 @@ func normalizeStreamText(value string) string {
 }
 
 func containsAllTokens(haystack, query string) bool {
+	if query == "" {
+		return false
+	}
+
+	haystackTokens := make(map[string]struct{})
+	for _, token := range strings.Fields(haystack) {
+		haystackTokens[token] = struct{}{}
+		haystackTokens[canonicalLanguage(token)] = struct{}{}
+	}
+
 	for _, token := range strings.Fields(query) {
-		if !strings.Contains(haystack, token) {
-			return false
+		normalized := normalizeStreamText(token)
+		if _, ok := haystackTokens[normalized]; ok {
+			continue
 		}
+		if _, ok := haystackTokens[canonicalLanguage(normalized)]; ok {
+			continue
+		}
+		if _, ok := haystackTokens[token]; ok {
+			continue
+		}
+		if _, ok := haystackTokens[canonicalLanguage(token)]; ok {
+			continue
+		}
+
+		return false
 	}
 	return true
 }
