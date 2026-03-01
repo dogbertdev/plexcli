@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/alecthomas/kong"
@@ -26,9 +27,10 @@ type StreamsListCmd struct {
 
 type StreamsSetCmd struct {
 	Show     string `arg:"" help:"Show name or rating key"`
-	Season   int    `help:"Season number (required)" short:"s" required:""`
-	Audio    string `help:"Audio stream to select (by language code, e.g., 'eng', 'jpn')" short:"a"`
-	Subtitle string `help:"Subtitle stream to select (by language code, e.g., 'eng', 'off')" short:"t"`
+	Season   int    `help:"Season number (required unless --all-seasons is set; use 0 for specials)" short:"s" default:"-1"`
+	All      bool   `help:"Apply to all seasons in the show" name:"all-seasons"`
+	Audio    string `help:"Audio stream to select (language code or name, e.g., 'eng', 'jpn', 'japanese')" short:"a"`
+	Subtitle string `help:"Subtitle stream to select (language/code/title, e.g., 'eng', 'full english', 'off')" short:"t"`
 	DryRun   bool   `help:"Show what would be changed without making changes" short:"n"`
 	Output   string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
@@ -101,8 +103,11 @@ func (c *StreamsListCmd) outputResults(w io.Writer, streams []plexclient.StreamI
 		}
 
 		title := s.Title
+		if title == "" {
+			title = s.DisplayTitle
+		}
 		if s.Channels > 0 {
-			title = fmt.Sprintf("%s (%d ch)", s.Title, s.Channels)
+			title = fmt.Sprintf("%s (%d ch)", title, s.Channels)
 		}
 
 		rows[i] = []string{
@@ -121,8 +126,8 @@ func (c *StreamsListCmd) outputResults(w io.Writer, streams []plexclient.StreamI
 }
 
 func (c *StreamsSetCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	if c.Audio == "" && c.Subtitle == "" {
-		return fmt.Errorf("at least one of --audio or --subtitle must be specified")
+	if err := c.validateArgs(); err != nil {
+		return err
 	}
 
 	cc, err := NewClientContext(cfg)
@@ -137,13 +142,16 @@ func (c *StreamsSetCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) err
 		return err
 	}
 
-	// Get episodes for the season
-	episodes, err := cc.Client.GetSeasonEpisodes(cc.Ctx, showKey, c.Season)
+	// Get episodes to update
+	episodes, err := c.getTargetEpisodes(cc.Ctx, cc.Client, showKey)
 	if err != nil {
 		return err
 	}
 
 	if len(episodes) == 0 {
+		if c.All {
+			return fmt.Errorf("no episodes found for show")
+		}
 		return fmt.Errorf("no episodes found for season %d", c.Season)
 	}
 
@@ -165,10 +173,10 @@ func (c *StreamsSetCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) err
 		}
 
 		// Find matching audio stream
-		var audioStreamID int
+		var audioStreamID *int
 		if c.Audio != "" {
-			audioStreamID = findStreamByLanguage(streams, 2, c.Audio)
-			if audioStreamID > 0 {
+			if streamID := findStreamByLanguage(streams, 2, c.Audio); streamID > 0 {
+				audioStreamID = &streamID
 				result.AudioSet = c.Audio
 			} else {
 				result.AudioSet = fmt.Sprintf("%s (not found)", c.Audio)
@@ -176,19 +184,25 @@ func (c *StreamsSetCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) err
 		}
 
 		// Find matching subtitle stream
-		var subtitleStreamID int
+		var subtitleStreamID *int
 		if c.Subtitle != "" {
 			if strings.ToLower(c.Subtitle) == "off" || strings.ToLower(c.Subtitle) == "none" {
-				subtitleStreamID = 0 // Special value to disable subtitles
+				disableSubtitles := 0 // Special value to disable subtitles
+				subtitleStreamID = &disableSubtitles
 				result.SubtitleSet = "off"
 			} else {
-				subtitleStreamID = findStreamByLanguage(streams, 3, c.Subtitle)
-				if subtitleStreamID > 0 {
+				if streamID := findStreamByLanguage(streams, 3, c.Subtitle); streamID > 0 {
+					subtitleStreamID = &streamID
 					result.SubtitleSet = c.Subtitle
 				} else {
 					result.SubtitleSet = fmt.Sprintf("%s (not found)", c.Subtitle)
 				}
 			}
+		}
+		if audioStreamID == nil && subtitleStreamID == nil {
+			result.Status = "Skipped (no matching streams)"
+			results = append(results, result)
+			continue
 		}
 
 		if c.DryRun {
@@ -206,6 +220,52 @@ func (c *StreamsSetCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) err
 	}
 
 	return c.outputResults(u.Out(), results)
+}
+
+func (c *StreamsSetCmd) validateArgs() error {
+	if c.Audio == "" && c.Subtitle == "" {
+		return fmt.Errorf("at least one of --audio or --subtitle must be specified")
+	}
+	if !c.All && c.Season < 0 {
+		return fmt.Errorf("specify --season or --all-seasons")
+	}
+	if c.All && c.Season >= 0 {
+		return fmt.Errorf("use either --season or --all-seasons, not both")
+	}
+	return nil
+}
+
+func (c *StreamsSetCmd) getTargetEpisodes(ctx context.Context, client *plexclient.Client, showKey string) ([]plexclient.EpisodeInfo, error) {
+	if !c.All {
+		return client.GetSeasonEpisodes(ctx, showKey, c.Season)
+	}
+
+	allEpisodes, err := client.GetShowEpisodes(ctx, showKey)
+	if err != nil {
+		return nil, err
+	}
+
+	seasonSet := make(map[int]struct{})
+	for _, ep := range allEpisodes {
+		seasonSet[ep.SeasonNum] = struct{}{}
+	}
+
+	seasons := make([]int, 0, len(seasonSet))
+	for season := range seasonSet {
+		seasons = append(seasons, season)
+	}
+	sort.Ints(seasons)
+
+	results := make([]plexclient.EpisodeInfo, 0, len(allEpisodes))
+	for _, season := range seasons {
+		episodes, seasonErr := client.GetSeasonEpisodes(ctx, showKey, season)
+		if seasonErr != nil {
+			return nil, seasonErr
+		}
+		results = append(results, episodes...)
+	}
+
+	return results, nil
 }
 
 func (c *StreamsSetCmd) findShow(ctx context.Context, client *plexclient.Client) (string, error) {
@@ -246,17 +306,161 @@ func pickShowMatch(results []plexclient.SearchResult, query string) (plexclient.
 }
 
 func findStreamByLanguage(streams []plexclient.StreamInfo, streamType int, langCode string) int {
-	langCode = strings.ToLower(langCode)
+	query := normalizeStreamText(langCode)
+	if query == "" {
+		return 0
+	}
+	isFullEnglishSubtitle := streamType == 3 && strings.Contains(query, "full") && isEnglishQuery(query)
+	isEnglishSubtitle := streamType == 3 && isEnglishQuery(query)
 
+	// Prefer full English subtitles when explicitly requested.
+	if isFullEnglishSubtitle {
+		if id := preferFullEnglishSubtitle(streams, streamType, true); id > 0 {
+			return id
+		}
+	}
+
+	// For generic English subtitle requests, prefer full subtitles over signs/songs.
+	if isEnglishSubtitle {
+		if id := preferFullEnglishSubtitle(streams, streamType, false); id > 0 {
+			return id
+		}
+	}
+
+	// Exact match on language code, language, or stream title.
 	for _, s := range streams {
 		if s.StreamType != streamType {
 			continue
 		}
-		if strings.ToLower(s.LanguageCode) == langCode || strings.ToLower(s.Language) == langCode {
+		if normalizeStreamText(s.LanguageCode) == query ||
+			normalizeStreamText(s.Language) == query ||
+			normalizeStreamText(s.Title) == query {
+			return s.ID
+		}
+	}
+
+	// Alias-aware match (e.g. jpn/japanese, eng/english).
+	queryCanonical := canonicalLanguage(query)
+	for _, s := range streams {
+		if s.StreamType != streamType {
+			continue
+		}
+		if canonicalLanguage(s.LanguageCode) == queryCanonical ||
+			canonicalLanguage(s.Language) == queryCanonical {
+			return s.ID
+		}
+	}
+
+	// Fuzzy token match (useful for inputs like "full english").
+	for _, s := range streams {
+		if s.StreamType != streamType {
+			continue
+		}
+		candidate := normalizeStreamText(strings.Join([]string{
+			s.LanguageCode,
+			s.Language,
+			s.Title,
+			s.DisplayTitle,
+		}, " "))
+		if containsAllTokens(candidate, query) {
 			return s.ID
 		}
 	}
 	return 0
+}
+
+func preferFullEnglishSubtitle(streams []plexclient.StreamInfo, streamType int, allowSDH bool) int {
+	bestNonSDH := 0
+	bestSDH := 0
+	for _, s := range streams {
+		if s.StreamType != streamType {
+			continue
+		}
+		if !(isEnglishQuery(s.LanguageCode) || isEnglishQuery(s.Language)) {
+			continue
+		}
+
+		title := normalizeStreamText(strings.Join([]string{s.Title, s.DisplayTitle}, " "))
+		if !strings.Contains(title, "full") {
+			continue
+		}
+
+		if strings.Contains(title, "sdh") {
+			if bestSDH == 0 {
+				bestSDH = s.ID
+			}
+			continue
+		}
+		if bestNonSDH == 0 {
+			bestNonSDH = s.ID
+		}
+	}
+
+	if bestNonSDH > 0 {
+		return bestNonSDH
+	}
+	if allowSDH {
+		return bestSDH
+	}
+	return 0
+}
+
+func normalizeStreamText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer("-", " ", "_", " ", "/", " ", "(", " ", ")", " ", ",", " ")
+	value = replacer.Replace(value)
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func containsAllTokens(haystack, query string) bool {
+	if query == "" {
+		return false
+	}
+
+	haystackTokens := make(map[string]struct{})
+	for _, token := range strings.Fields(haystack) {
+		haystackTokens[token] = struct{}{}
+		haystackTokens[canonicalLanguage(token)] = struct{}{}
+	}
+
+	for _, token := range strings.Fields(query) {
+		normalized := normalizeStreamText(token)
+		if _, ok := haystackTokens[normalized]; ok {
+			continue
+		}
+		if _, ok := haystackTokens[canonicalLanguage(normalized)]; ok {
+			continue
+		}
+		if _, ok := haystackTokens[token]; ok {
+			continue
+		}
+		if _, ok := haystackTokens[canonicalLanguage(token)]; ok {
+			continue
+		}
+
+		return false
+	}
+	return true
+}
+
+func isEnglishQuery(value string) bool {
+	switch canonicalLanguage(value) {
+	case "english":
+		return true
+	default:
+		return false
+	}
+}
+
+func canonicalLanguage(value string) string {
+	switch normalizeStreamText(value) {
+	case "en", "eng", "english":
+		return "english"
+	case "ja", "jp", "jpn", "japanese":
+		return "japanese"
+	default:
+		return normalizeStreamText(value)
+	}
 }
 
 func (c *StreamsSetCmd) outputResults(w io.Writer, results []EpisodeStreamResult) error {

@@ -1775,6 +1775,7 @@ type StreamInfo struct {
 	LanguageCode string `json:"language_code"`
 	Codec        string `json:"codec"`
 	Title        string `json:"title,omitempty"`
+	DisplayTitle string `json:"display_title,omitempty"`
 	Channels     int    `json:"channels,omitempty"`
 	Selected     bool   `json:"selected"`
 	Default      bool   `json:"default"`
@@ -1835,7 +1836,8 @@ func (c *Client) GetStreams(ctx context.Context, ratingKey string) ([]StreamInfo
 							Language     string `xml:"language,attr"`
 							LanguageCode string `xml:"languageCode,attr"`
 							Codec        string `xml:"codec,attr"`
-							Title        string `xml:"displayTitle,attr"`
+							Title        string `xml:"title,attr"`
+							DisplayTitle string `xml:"displayTitle,attr"`
 							Channels     int    `xml:"channels,attr"`
 							Selected     int    `xml:"selected,attr"`
 							Default      int    `xml:"default,attr"`
@@ -1861,6 +1863,7 @@ func (c *Client) GetStreams(ctx context.Context, ratingKey string) ([]StreamInfo
 							LanguageCode: s.LanguageCode,
 							Codec:        s.Codec,
 							Title:        s.Title,
+							DisplayTitle: s.DisplayTitle,
 							Channels:     s.Channels,
 							Selected:     s.Selected == 1,
 							Default:      s.Default == 1,
@@ -1883,8 +1886,9 @@ func (c *Client) GetStreams(ctx context.Context, ratingKey string) ([]StreamInfo
 	return streams, nil
 }
 
-// SetStreams sets the default audio and/or subtitle stream for a part
-func (c *Client) SetStreams(ctx context.Context, partID string, audioStreamID, subtitleStreamID int) error {
+// SetStreams sets the default audio and/or subtitle stream for a part.
+// Pass nil to leave a stream type unchanged. For subtitles, 0 means disable.
+func (c *Client) SetStreams(ctx context.Context, partID string, audioStreamID, subtitleStreamID *int) error {
 	if partID == "" {
 		return &PlexError{
 			Op:  "SetStreams",
@@ -1896,12 +1900,12 @@ func (c *Client) SetStreams(ctx context.Context, partID string, audioStreamID, s
 		urlStr := fmt.Sprintf("%s/library/parts/%s?X-Plex-Token=%s",
 			c.serverURL, partID, c.token)
 
-		if audioStreamID > 0 {
-			urlStr += fmt.Sprintf("&audioStreamID=%d", audioStreamID)
+		if audioStreamID != nil && *audioStreamID > 0 {
+			urlStr += fmt.Sprintf("&audioStreamID=%d", *audioStreamID)
 		}
-		if subtitleStreamID > 0 {
-			urlStr += fmt.Sprintf("&subtitleStreamID=%d", subtitleStreamID)
-		} else if subtitleStreamID == 0 {
+		if subtitleStreamID != nil && *subtitleStreamID > 0 {
+			urlStr += fmt.Sprintf("&subtitleStreamID=%d", *subtitleStreamID)
+		} else if subtitleStreamID != nil && *subtitleStreamID == 0 {
 			// 0 means disable subtitles
 			urlStr += "&subtitleStreamID=0"
 		}
