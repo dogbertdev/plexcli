@@ -2,6 +2,8 @@ package plexclient
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -14,6 +16,8 @@ import (
 	"time"
 
 	"github.com/LukeHagar/plexgo/models/components"
+
+	"github.com/dogbertdev/plexcli/internal/cache"
 )
 
 const (
@@ -27,6 +31,7 @@ const (
 	MaxBackoffDuration       = 30 * time.Second
 	DefaultClientID          = "plexcli"
 	DefaultLibraryPathPrefix = "/library/sections/"
+	DefaultLibraryCacheTTL   = 5 * time.Minute
 )
 
 // Library represents a Plex library section.
@@ -41,10 +46,13 @@ type Library struct {
 
 // Client provides access to a Plex server.
 type Client struct {
-	httpClient *http.Client
-	serverURL  string
-	token      string
-	maxRetries int
+	httpClient          *http.Client
+	serverURL           string
+	token               string
+	maxRetries          int
+	libraryCache        *cache.LibraryPayloadCache
+	libraryCacheTTL     time.Duration
+	libraryCacheRefresh bool
 }
 
 type ClientOption func(*Client)
@@ -61,6 +69,24 @@ func WithMaxRetries(maxRetries int) ClientOption {
 	}
 }
 
+func WithLibraryCache(cacheStore *cache.LibraryPayloadCache) ClientOption {
+	return func(c *Client) {
+		c.libraryCache = cacheStore
+	}
+}
+
+func WithLibraryCacheTTL(ttl time.Duration) ClientOption {
+	return func(c *Client) {
+		c.libraryCacheTTL = ttl
+	}
+}
+
+func WithLibraryCacheRefresh(refresh bool) ClientOption {
+	return func(c *Client) {
+		c.libraryCacheRefresh = refresh
+	}
+}
+
 func NewClient(serverURL, token string, opts ...ClientOption) (*Client, error) {
 	if serverURL == "" {
 		return nil, fmt.Errorf("server URL is required")
@@ -70,10 +96,11 @@ func NewClient(serverURL, token string, opts ...ClientOption) (*Client, error) {
 	}
 
 	client := &Client{
-		httpClient: &http.Client{Timeout: DefaultTimeout},
-		serverURL:  serverURL,
-		token:      token,
-		maxRetries: DefaultMaxRetries,
+		httpClient:      &http.Client{Timeout: DefaultTimeout},
+		serverURL:       serverURL,
+		token:           token,
+		maxRetries:      DefaultMaxRetries,
+		libraryCacheTTL: DefaultLibraryCacheTTL,
 	}
 
 	for _, opt := range opts {
@@ -199,44 +226,40 @@ func (c *Client) GetAllLibraryItems(ctx context.Context, sectionID string) ([]*c
 		}
 	}
 
-	var allItems []*components.Metadata
+	body, cacheHit, err := c.loadLibrarySectionFromCache(sectionID)
+	if err != nil {
+		body = nil
+		cacheHit = false
+	}
 
-	err := c.executeWithRetry(ctx, "GetAllLibraryItems", func() error {
-		url := fmt.Sprintf("%s/library/sections/%s/all?X-Plex-Container-Start=0&X-Plex-Container-Size=1000&X-Plex-Token=%s", c.serverURL, sectionID, c.token)
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-		if err != nil {
-			return fmt.Errorf("failed to create request: %w", err)
-		}
+	if !cacheHit {
+		err = c.executeWithRetry(ctx, "GetAllLibraryItems", func() error {
+			url := fmt.Sprintf("%s/library/sections/%s/all?X-Plex-Container-Start=0&X-Plex-Container-Size=1000&X-Plex-Token=%s", c.serverURL, sectionID, c.token)
+			req, reqErr := http.NewRequestWithContext(ctx, "GET", url, nil)
+			if reqErr != nil {
+				return fmt.Errorf("failed to create request: %w", reqErr)
+			}
 
-		req.Header.Set("Accept", "application/json")
+			req.Header.Set("Accept", "application/json")
 
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			return fmt.Errorf("failed to make request: %w", err)
-		}
-		defer resp.Body.Close()
+			resp, doErr := c.httpClient.Do(req)
+			if doErr != nil {
+				return fmt.Errorf("failed to make request: %w", doErr)
+			}
+			defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-		}
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+			}
 
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("failed to read response body: %w", err)
-		}
+			body, doErr = io.ReadAll(resp.Body)
+			if doErr != nil {
+				return fmt.Errorf("failed to read response body: %w", doErr)
+			}
 
-		var rawResp rawLibraryItemsResponse
-		if err := json.Unmarshal(body, &rawResp); err != nil {
-			return fmt.Errorf("failed to unmarshal response: %w", err)
-		}
-
-		for _, item := range rawResp.MediaContainer.Metadata {
-			meta := convertRawToMetadata(item)
-			allItems = append(allItems, meta)
-		}
-
-		return nil
-	})
+			return nil
+		})
+	}
 
 	if err != nil {
 		return nil, &PlexError{
@@ -246,7 +269,48 @@ func (c *Client) GetAllLibraryItems(ctx context.Context, sectionID string) ([]*c
 		}
 	}
 
+	var rawResp rawLibraryItemsResponse
+	if err := json.Unmarshal(body, &rawResp); err != nil {
+		return nil, &PlexError{
+			Op:      "GetAllLibraryItems",
+			Section: sectionID,
+			Err:     fmt.Errorf("failed to unmarshal response: %w", err),
+		}
+	}
+
+	if !cacheHit {
+		_ = c.saveLibrarySectionToCache(sectionID, body)
+	}
+
+	allItems := make([]*components.Metadata, 0, len(rawResp.MediaContainer.Metadata))
+	for _, item := range rawResp.MediaContainer.Metadata {
+		meta := convertRawToMetadata(item)
+		allItems = append(allItems, meta)
+	}
+
 	return allItems, nil
+}
+
+func (c *Client) loadLibrarySectionFromCache(sectionID string) ([]byte, bool, error) {
+	if c.libraryCache == nil || c.libraryCacheRefresh || c.libraryCacheTTL <= 0 {
+		return nil, false, nil
+	}
+
+	return c.libraryCache.Load(c.libraryCacheKey(sectionID), c.libraryCacheTTL)
+}
+
+func (c *Client) saveLibrarySectionToCache(sectionID string, body []byte) error {
+	if c.libraryCache == nil || len(body) == 0 {
+		return nil
+	}
+
+	return c.libraryCache.Save(c.libraryCacheKey(sectionID), body)
+}
+
+func (c *Client) libraryCacheKey(sectionID string) string {
+	rawKey := c.serverURL + "|" + c.token + "|" + sectionID
+	hash := sha256.Sum256([]byte(rawKey))
+	return hex.EncodeToString(hash[:])
 }
 
 // GetItemMetadata fetches detailed metadata for a single item including streams

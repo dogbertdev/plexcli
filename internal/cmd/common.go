@@ -8,6 +8,7 @@ import (
 	"github.com/LukeHagar/plexgo/models/components"
 
 	"github.com/dogbertdev/plexcli/internal/auth"
+	"github.com/dogbertdev/plexcli/internal/cache"
 	"github.com/dogbertdev/plexcli/internal/config"
 	"github.com/dogbertdev/plexcli/internal/plexclient"
 )
@@ -43,7 +44,26 @@ func NewClientContext(cfg *config.Config) (*ClientContext, error) {
 		timeout = plexclient.DefaultTimeout
 	}
 
-	client, err := plexclient.NewClient(cfg.ServerURL, token, plexclient.WithTimeout(timeout))
+	opts := []plexclient.ClientOption{
+		plexclient.WithTimeout(timeout),
+	}
+
+	if !cfg.CacheDisabled {
+		cacheStore, cacheErr := cache.NewDefaultLibraryPayloadCache()
+		if cacheErr == nil {
+			ttl := time.Duration(cfg.CacheTTL) * time.Second
+			if ttl <= 0 {
+				ttl = plexclient.DefaultLibraryCacheTTL
+			}
+			opts = append(opts,
+				plexclient.WithLibraryCache(cacheStore),
+				plexclient.WithLibraryCacheTTL(ttl),
+				plexclient.WithLibraryCacheRefresh(cfg.CacheRefresh),
+			)
+		}
+	}
+
+	client, err := plexclient.NewClient(cfg.ServerURL, token, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create plex client: %w", err)
 	}
