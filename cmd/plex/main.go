@@ -55,6 +55,7 @@ type CLI struct {
 	Streams      cmd.StreamsCmd          `cmd:"" help:"Manage audio and subtitle streams"`
 	Watch        cmd.WatchCmd            `cmd:"" help:"View watch activity and statistics"`
 	Cache        cmd.CacheCmd            `cmd:"" help:"Manage local cache"`
+	Auth         cmd.AuthCmd             `cmd:"" help:"Authenticate with Plex and manage stored credentials"`
 }
 
 func main() {
@@ -177,6 +178,7 @@ func applyOutputFormat(cli *CLI, format string) {
 	cli.Watch.History.Output = format
 	cli.Watch.Stats.Output = format
 	cli.Cache.Clear.Output = format
+	cli.Auth.Servers.Output = format
 }
 
 // loadConfig loads configuration from file and/or environment/cli flags

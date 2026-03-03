@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -158,6 +159,7 @@ func TestErrors(t *testing.T) {
 		{"ErrInvalidToken", ErrInvalidToken},
 		{"ErrInvalidCredentials", ErrInvalidCredentials},
 		{"ErrAuthFailed", ErrAuthFailed},
+		{"ErrPINExpired", ErrPINExpired},
 	}
 
 	for _, tt := range tests {
@@ -166,5 +168,43 @@ func TestErrors(t *testing.T) {
 				t.Error("expected non-nil error")
 			}
 		})
+	}
+}
+
+func TestBuildAuthURL(t *testing.T) {
+	got := BuildAuthURL("client-123", "code-abc", "plexcli")
+	if !strings.HasPrefix(got, "https://app.plex.tv/auth#?") {
+		t.Fatalf("unexpected auth URL prefix: %s", got)
+	}
+	if !strings.Contains(got, "clientID=client-123") {
+		t.Fatalf("auth URL missing clientID: %s", got)
+	}
+	if !strings.Contains(got, "code=code-abc") {
+		t.Fatalf("auth URL missing code: %s", got)
+	}
+}
+
+func TestPollPINToken_InvalidPINID(t *testing.T) {
+	ctx := context.Background()
+	_, err := PollPINToken(ctx, 0, DefaultClientID, DefaultPINPoll)
+	if err == nil {
+		t.Fatal("expected error for invalid PIN id")
+	}
+}
+
+func TestPreferredServerURI(t *testing.T) {
+	server := ServerResource{
+		Connections: []ServerConnection{
+			{Protocol: "http", URI: "http://public.example:32400", Local: false},
+			{Protocol: "https", URI: "https://local.example:32400", Local: true},
+		},
+	}
+
+	got, ok := PreferredServerURI(server, true)
+	if !ok {
+		t.Fatal("expected preferred URI to be found")
+	}
+	if got != "https://local.example:32400" {
+		t.Fatalf("unexpected preferred URI: %s", got)
 	}
 }
