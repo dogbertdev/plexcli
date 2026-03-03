@@ -61,7 +61,7 @@ func TestAuthLogoutRunClearsStoredCredentials(t *testing.T) {
 		t.Fatalf("logout failed: %v", runErr)
 	}
 
-	got, readErr := config.ReadConfig()
+	got, readErr := config.ReadConfigFileOnly()
 	if readErr != nil {
 		t.Fatalf("failed to read config: %v", readErr)
 	}
@@ -99,7 +99,7 @@ func TestApplySelectedServer_UsesServerAccessTokenWhenPresent(t *testing.T) {
 		AccessToken: "server-token",
 	}
 
-	applySelectedServer(cfg, server, "https://example:32400")
+	applySelectedServer(cfg, server, "https://example:32400", "account-token")
 
 	if cfg.ServerURL != "https://example:32400" {
 		t.Fatalf("expected server URL to be set, got %q", cfg.ServerURL)
@@ -113,9 +113,20 @@ func TestApplySelectedServer_KeepsExistingTokenWhenServerTokenMissing(t *testing
 	cfg := &config.Config{Token: "account-token"}
 	server := auth.ServerResource{}
 
-	applySelectedServer(cfg, server, "https://example:32400")
+	applySelectedServer(cfg, server, "https://example:32400", "account-token")
 
 	if cfg.Token != "account-token" {
 		t.Fatalf("expected existing token to be preserved, got %q", cfg.Token)
+	}
+}
+
+func TestApplySelectedServer_UsesFallbackTokenWhenConfigTokenEmpty(t *testing.T) {
+	cfg := &config.Config{Token: ""}
+	server := auth.ServerResource{}
+
+	applySelectedServer(cfg, server, "https://example:32400", "runtime-token")
+
+	if cfg.Token != "runtime-token" {
+		t.Fatalf("expected fallback token to be used, got %q", cfg.Token)
 	}
 }
