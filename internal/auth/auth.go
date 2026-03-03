@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ const (
 	DefaultPlatform = "Go"
 	StatusOK        = 200
 	StatusCreated   = 201
+	DefaultPINPoll  = 1 * time.Second
 )
 
 var (
@@ -28,6 +30,7 @@ var (
 	ErrInvalidToken       = fmt.Errorf("invalid or expired token")
 	ErrInvalidCredentials = fmt.Errorf("invalid username or password")
 	ErrAuthFailed         = fmt.Errorf("authentication failed")
+	ErrPINExpired         = fmt.Errorf("authentication PIN expired")
 )
 
 type AuthMethod interface {
@@ -39,6 +42,30 @@ type userResponse struct {
 	AuthToken string `json:"authToken"`
 	Username  string `json:"username"`
 	Email     string `json:"email"`
+}
+
+type pinResponse struct {
+	ID        int64  `json:"id"`
+	Code      string `json:"code"`
+	AuthToken string `json:"authToken"`
+	ExpiresIn int    `json:"expiresIn"`
+}
+
+type ServerConnection struct {
+	Protocol string `json:"protocol"`
+	URI      string `json:"uri"`
+	Local    bool   `json:"local"`
+	Relay    bool   `json:"relay"`
+}
+
+type ServerResource struct {
+	Name             string             `json:"name"`
+	Product          string             `json:"product"`
+	ClientIdentifier string             `json:"clientIdentifier"`
+	Owned            bool               `json:"owned"`
+	Presence         bool               `json:"presence"`
+	AccessToken      string             `json:"accessToken"`
+	Connections      []ServerConnection `json:"connections"`
 }
 
 type TokenAuth struct {
@@ -219,4 +246,185 @@ func GetTokenAndStore(ctx context.Context, cfg config.Config) (string, error) {
 	}
 
 	return token, nil
+}
+
+func CreatePIN(ctx context.Context, clientID, product string) (*pinResponse, error) {
+	if clientID == "" {
+		clientID = DefaultClientID
+	}
+	if product == "" {
+		product = DefaultProduct
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", PlexTVURL+"/pins?strong=true", nil)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to create PIN request: %v", ErrAuthFailed, err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Client-Identifier", clientID)
+	req.Header.Set("X-Plex-Product", product)
+	req.Header.Set("X-Plex-Version", DefaultVersion)
+	req.Header.Set("X-Plex-Platform", DefaultPlatform)
+
+	resp, err := (&http.Client{Timeout: DefaultTimeout}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to create PIN: %v", ErrAuthFailed, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != StatusCreated && resp.StatusCode != StatusOK {
+		return nil, fmt.Errorf("%w: failed to create PIN (status %d)", ErrAuthFailed, resp.StatusCode)
+	}
+
+	var pin pinResponse
+	if err := json.NewDecoder(resp.Body).Decode(&pin); err != nil {
+		return nil, fmt.Errorf("%w: failed to decode PIN response: %v", ErrAuthFailed, err)
+	}
+	if pin.ID == 0 || pin.Code == "" {
+		return nil, fmt.Errorf("%w: invalid PIN response", ErrAuthFailed)
+	}
+
+	return &pin, nil
+}
+
+func BuildAuthURL(clientID, code, product string) string {
+	if clientID == "" {
+		clientID = DefaultClientID
+	}
+	if product == "" {
+		product = DefaultProduct
+	}
+
+	values := url.Values{}
+	values.Set("clientID", clientID)
+	values.Set("code", code)
+	values.Set("context[device][product]", product)
+	return "https://app.plex.tv/auth#?" + values.Encode()
+}
+
+func PollPINToken(ctx context.Context, pinID int64, clientID string, pollInterval time.Duration) (string, error) {
+	if pinID == 0 {
+		return "", fmt.Errorf("%w: invalid PIN id", ErrAuthFailed)
+	}
+	if clientID == "" {
+		clientID = DefaultClientID
+	}
+	if pollInterval <= 0 {
+		pollInterval = DefaultPINPoll
+	}
+
+	client := &http.Client{Timeout: DefaultTimeout}
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		req, err := http.NewRequestWithContext(ctx, "GET", PlexTVURL+"/pins/"+strconv.FormatInt(pinID, 10), nil)
+		if err != nil {
+			return "", fmt.Errorf("%w: failed to poll PIN: %v", ErrAuthFailed, err)
+		}
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("X-Plex-Client-Identifier", clientID)
+		req.Header.Set("X-Plex-Product", DefaultProduct)
+		req.Header.Set("X-Plex-Version", DefaultVersion)
+		req.Header.Set("X-Plex-Platform", DefaultPlatform)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", fmt.Errorf("%w: %v", ErrPINExpired, ctx.Err())
+			}
+			return "", fmt.Errorf("%w: failed to poll PIN: %v", ErrAuthFailed, err)
+		}
+
+		var pin pinResponse
+		decodeErr := json.NewDecoder(resp.Body).Decode(&pin)
+		resp.Body.Close()
+		if resp.StatusCode != StatusOK {
+			return "", fmt.Errorf("%w: failed to poll PIN (status %d)", ErrAuthFailed, resp.StatusCode)
+		}
+		if decodeErr != nil {
+			return "", fmt.Errorf("%w: failed to decode PIN poll response: %v", ErrAuthFailed, decodeErr)
+		}
+		if pin.AuthToken != "" {
+			return pin.AuthToken, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("%w: %v", ErrPINExpired, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func DiscoverServers(ctx context.Context, token string) ([]ServerResource, error) {
+	if token == "" {
+		return nil, ErrNoCredentials
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", PlexTVURL+"/resources?includeHttps=1", nil)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to create discover request: %v", ErrAuthFailed, err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Token", token)
+	req.Header.Set("X-Plex-Client-Identifier", DefaultClientID)
+	req.Header.Set("X-Plex-Product", DefaultProduct)
+	req.Header.Set("X-Plex-Version", DefaultVersion)
+	req.Header.Set("X-Plex-Platform", DefaultPlatform)
+
+	resp, err := (&http.Client{Timeout: DefaultTimeout}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to discover servers: %v", ErrAuthFailed, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != StatusOK {
+		return nil, fmt.Errorf("%w: failed to discover servers (status %d)", ErrAuthFailed, resp.StatusCode)
+	}
+
+	var resources []ServerResource
+	if err := json.NewDecoder(resp.Body).Decode(&resources); err != nil {
+		return nil, fmt.Errorf("%w: failed to decode server resources: %v", ErrAuthFailed, err)
+	}
+
+	servers := make([]ServerResource, 0, len(resources))
+	for _, resource := range resources {
+		if strings.Contains(resource.Product, "Plex Media Server") {
+			servers = append(servers, resource)
+		}
+	}
+
+	return servers, nil
+}
+
+func PreferredServerURI(server ServerResource, preferLocal bool) (string, bool) {
+	if len(server.Connections) == 0 {
+		return "", false
+	}
+
+	type matcher struct {
+		localOnly bool
+		protocol  string
+	}
+	orders := []matcher{
+		{localOnly: preferLocal, protocol: "https"},
+		{localOnly: preferLocal, protocol: "http"},
+		{localOnly: false, protocol: "https"},
+		{localOnly: false, protocol: "http"},
+	}
+
+	for _, order := range orders {
+		for _, c := range server.Connections {
+			if order.localOnly && !c.Local {
+				continue
+			}
+			if c.URI == "" || c.Protocol != order.protocol {
+				continue
+			}
+			return c.URI, true
+		}
+	}
+
+	return "", false
 }

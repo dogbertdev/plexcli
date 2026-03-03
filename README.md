@@ -62,9 +62,17 @@ The CLI supports configuration through:
 
 ### Getting a Plex Token
 
-1. Sign in to your Plex account at https://plex.tv
-2. Visit https://plex.tv/claim or check your Plex server settings
-3. Copy the token for use with this CLI
+Use the built-in auth flow:
+
+```bash
+# Browser-based login (recommended)
+plex auth login --browser
+
+# Username/password login
+plex auth login --username your-email@example.com --password 'your-password'
+```
+
+This fetches a token from Plex and stores it in your config file.
 
 ## Usage
 
@@ -93,6 +101,25 @@ plex --help
 ```bash
 # Clear local library cache
 plex cache clear
+```
+
+#### Authenticate
+
+```bash
+# Login in browser and fetch/store a Plex token
+plex auth login --browser
+
+# Login with username/password and fetch/store a Plex token
+plex auth login --username your-email@example.com --password 'your-password'
+
+# Logout and clear stored credentials
+plex auth logout
+
+# Discover available servers
+plex auth servers
+
+# Select server #1 from discovered list and save it to config
+plex auth servers --select 1
 ```
 
 #### List Unwatched Items
