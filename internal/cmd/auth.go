@@ -252,7 +252,7 @@ func (c *AuthServersCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) er
 		if err != nil {
 			savedCfg = &config.Config{}
 		}
-		savedCfg.ServerURL = serverURL
+		applySelectedServer(savedCfg, server, serverURL)
 		if err := config.WriteConfig(savedCfg); err != nil {
 			return fmt.Errorf("failed to save selected server: %w", err)
 		}
@@ -285,4 +285,11 @@ func (c *AuthServersCmd) output(w io.Writer, items []AuthServerItem) error {
 	}
 
 	return formatter.Format(w, header, rows, items)
+}
+
+func applySelectedServer(cfg *config.Config, server auth.ServerResource, serverURL string) {
+	cfg.ServerURL = serverURL
+	if server.AccessToken != "" {
+		cfg.Token = server.AccessToken
+	}
 }

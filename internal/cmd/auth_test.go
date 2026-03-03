@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/dogbertdev/plexcli/internal/auth"
 	"github.com/dogbertdev/plexcli/internal/config"
 	"github.com/dogbertdev/plexcli/internal/ui"
 )
@@ -89,5 +90,32 @@ func TestAuthServersRunRequiresToken(t *testing.T) {
 	err := cmd.Run(nil, u, cfg)
 	if err == nil {
 		t.Fatal("expected error when token is missing")
+	}
+}
+
+func TestApplySelectedServer_UsesServerAccessTokenWhenPresent(t *testing.T) {
+	cfg := &config.Config{Token: "account-token"}
+	server := auth.ServerResource{
+		AccessToken: "server-token",
+	}
+
+	applySelectedServer(cfg, server, "https://example:32400")
+
+	if cfg.ServerURL != "https://example:32400" {
+		t.Fatalf("expected server URL to be set, got %q", cfg.ServerURL)
+	}
+	if cfg.Token != "server-token" {
+		t.Fatalf("expected server token to be used, got %q", cfg.Token)
+	}
+}
+
+func TestApplySelectedServer_KeepsExistingTokenWhenServerTokenMissing(t *testing.T) {
+	cfg := &config.Config{Token: "account-token"}
+	server := auth.ServerResource{}
+
+	applySelectedServer(cfg, server, "https://example:32400")
+
+	if cfg.Token != "account-token" {
+		t.Fatalf("expected existing token to be preserved, got %q", cfg.Token)
 	}
 }
