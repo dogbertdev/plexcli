@@ -62,6 +62,15 @@ func ExpandPath(path string) (string, error) {
 
 // ReadConfig reads the configuration from the default path, overriding with environment variables.
 func ReadConfig() (*Config, error) {
+	return readConfig(true)
+}
+
+// ReadConfigFileOnly reads configuration from disk without applying environment overrides.
+func ReadConfigFileOnly() (*Config, error) {
+	return readConfig(false)
+}
+
+func readConfig(applyEnvOverrides bool) (*Config, error) {
 	path, err := ConfigPath()
 	if err != nil {
 		return nil, err
@@ -78,35 +87,37 @@ func ReadConfig() (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	// Override with environment variables
-	if val := os.Getenv("PLEX_SERVER"); val != "" {
-		cfg.ServerURL = val
-	}
-	if val := os.Getenv("PLEX_TOKEN"); val != "" {
-		cfg.Token = val
-	}
-	if val := os.Getenv("PLEX_USERNAME"); val != "" {
-		cfg.Username = val
-	}
-	if val := os.Getenv("PLEX_PASSWORD"); val != "" {
-		cfg.Password = val
-	}
-	if val := os.Getenv("PLEX_CACHE_TTL"); val != "" {
-		ttl, parseErr := strconv.Atoi(strings.TrimSpace(val))
-		if parseErr == nil {
-			cfg.CacheTTL = ttl
+	if applyEnvOverrides {
+		// Override with environment variables
+		if val := os.Getenv("PLEX_SERVER"); val != "" {
+			cfg.ServerURL = val
 		}
-	}
-	if val := os.Getenv("PLEX_NO_CACHE"); val != "" {
-		disable, parseErr := strconv.ParseBool(strings.TrimSpace(val))
-		if parseErr == nil {
-			cfg.CacheDisabled = disable
+		if val := os.Getenv("PLEX_TOKEN"); val != "" {
+			cfg.Token = val
 		}
-	}
-	if val := os.Getenv("PLEX_REFRESH_CACHE"); val != "" {
-		refresh, parseErr := strconv.ParseBool(strings.TrimSpace(val))
-		if parseErr == nil {
-			cfg.CacheRefresh = refresh
+		if val := os.Getenv("PLEX_USERNAME"); val != "" {
+			cfg.Username = val
+		}
+		if val := os.Getenv("PLEX_PASSWORD"); val != "" {
+			cfg.Password = val
+		}
+		if val := os.Getenv("PLEX_CACHE_TTL"); val != "" {
+			ttl, parseErr := strconv.Atoi(strings.TrimSpace(val))
+			if parseErr == nil {
+				cfg.CacheTTL = ttl
+			}
+		}
+		if val := os.Getenv("PLEX_NO_CACHE"); val != "" {
+			disable, parseErr := strconv.ParseBool(strings.TrimSpace(val))
+			if parseErr == nil {
+				cfg.CacheDisabled = disable
+			}
+		}
+		if val := os.Getenv("PLEX_REFRESH_CACHE"); val != "" {
+			refresh, parseErr := strconv.ParseBool(strings.TrimSpace(val))
+			if parseErr == nil {
+				cfg.CacheRefresh = refresh
+			}
 		}
 	}
 

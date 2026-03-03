@@ -91,7 +91,7 @@ func (c *AuthLoginCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) erro
 		}
 	}
 
-	savedCfg, err := config.ReadConfig()
+	savedCfg, err := config.ReadConfigFileOnly()
 	if err != nil {
 		savedCfg = &config.Config{}
 	}
@@ -120,7 +120,7 @@ func (c *AuthLoginCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) erro
 type AuthLogoutCmd struct{}
 
 func (c *AuthLogoutCmd) Run(ctx *kong.Context, u *ui.UI, _ *config.Config) error {
-	cfg, err := config.ReadConfig()
+	cfg, err := config.ReadConfigFileOnly()
 	if err != nil {
 		cfg = &config.Config{}
 	}
@@ -248,7 +248,7 @@ func (c *AuthServersCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) er
 			return fmt.Errorf("selected server has no usable connection URI")
 		}
 
-		savedCfg, err := config.ReadConfig()
+		savedCfg, err := config.ReadConfigFileOnly()
 		if err != nil {
 			savedCfg = &config.Config{}
 		}

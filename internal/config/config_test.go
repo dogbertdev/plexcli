@@ -108,6 +108,57 @@ func TestConfigEnvOverride(t *testing.T) {
 	}
 }
 
+func TestReadConfigFileOnly_IgnoresEnvironmentOverrides(t *testing.T) {
+	tmpHome, err := os.MkdirTemp("", "plexcli-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpHome)
+
+	originalHome := os.Getenv("HOME")
+	if setErr := os.Setenv("HOME", tmpHome); setErr != nil {
+		t.Fatal(setErr)
+	}
+	defer os.Setenv("HOME", originalHome)
+
+	cfg := &Config{
+		ServerURL: "http://localhost:32400",
+		Token:     "file-token",
+		Username:  "file-user",
+		Password:  "file-pass",
+	}
+	if writeErr := WriteConfig(cfg); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+
+	os.Setenv("PLEX_SERVER", "http://env-server:32400")
+	os.Setenv("PLEX_TOKEN", "env-token")
+	os.Setenv("PLEX_USERNAME", "env-user")
+	os.Setenv("PLEX_PASSWORD", "env-pass")
+	defer os.Unsetenv("PLEX_SERVER")
+	defer os.Unsetenv("PLEX_TOKEN")
+	defer os.Unsetenv("PLEX_USERNAME")
+	defer os.Unsetenv("PLEX_PASSWORD")
+
+	got, readErr := ReadConfigFileOnly()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+
+	if got.ServerURL != cfg.ServerURL {
+		t.Errorf("ServerURL should come from file: got %q want %q", got.ServerURL, cfg.ServerURL)
+	}
+	if got.Token != cfg.Token {
+		t.Errorf("Token should come from file: got %q want %q", got.Token, cfg.Token)
+	}
+	if got.Username != cfg.Username {
+		t.Errorf("Username should come from file: got %q want %q", got.Username, cfg.Username)
+	}
+	if got.Password != cfg.Password {
+		t.Errorf("Password should come from file: got %q want %q", got.Password, cfg.Password)
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {
 		name    string
