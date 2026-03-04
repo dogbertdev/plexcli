@@ -685,6 +685,144 @@ func (c *Client) GetSections(ctx context.Context) ([]Library, error) {
 	return libraries, nil
 }
 
+func (c *Client) RefreshSection(ctx context.Context, sectionID string) error {
+	return c.runLibrarySectionAction(ctx, "RefreshSection", sectionID, "refresh", http.MethodPost)
+}
+
+func (c *Client) RefreshAllSections(ctx context.Context) error {
+	return c.runLibraryGlobalAction(ctx, "RefreshAllSections", "library/sections/refresh", http.MethodPost)
+}
+
+func (c *Client) CancelRefresh(ctx context.Context, sectionID string) error {
+	return c.runLibrarySectionAction(ctx, "CancelRefresh", sectionID, "refresh", http.MethodDelete)
+}
+
+func (c *Client) StartAnalysis(ctx context.Context, sectionID string) error {
+	return c.runLibrarySectionAction(ctx, "StartAnalysis", sectionID, "analyze", http.MethodPut)
+}
+
+func (c *Client) AnalyzeMetadata(ctx context.Context, ids string) error {
+	if strings.TrimSpace(ids) == "" {
+		return &PlexError{
+			Op:  "AnalyzeMetadata",
+			Err: fmt.Errorf("ids are required"),
+		}
+	}
+
+	escapedIDs := url.PathEscape(ids)
+	return c.runLibraryGlobalAction(ctx, "AnalyzeMetadata", fmt.Sprintf("library/metadata/%s/analyze", escapedIDs), http.MethodPut)
+}
+
+func (c *Client) GenerateThumbs(ctx context.Context, ids string) error {
+	if strings.TrimSpace(ids) == "" {
+		return &PlexError{
+			Op:  "GenerateThumbs",
+			Err: fmt.Errorf("ids are required"),
+		}
+	}
+
+	escapedIDs := url.PathEscape(ids)
+	return c.runLibraryGlobalAction(ctx, "GenerateThumbs", fmt.Sprintf("library/metadata/%s/chapterThumbs", escapedIDs), http.MethodPut)
+}
+
+func (c *Client) EmptyTrash(ctx context.Context, sectionID string) error {
+	return c.runLibrarySectionAction(ctx, "EmptyTrash", sectionID, "emptyTrash", http.MethodPut)
+}
+
+func (c *Client) CleanSection(ctx context.Context, sectionID string) error {
+	return c.EmptyTrash(ctx, sectionID)
+}
+
+func (c *Client) OptimizeDatabase(ctx context.Context) error {
+	return c.runLibraryGlobalAction(ctx, "OptimizeDatabase", "library/optimize", http.MethodPut)
+}
+
+func (c *Client) CleanBundles(ctx context.Context) error {
+	return c.runLibraryGlobalAction(ctx, "CleanBundles", "library/clean/bundles", http.MethodPut)
+}
+
+func (c *Client) DeleteCaches(ctx context.Context) error {
+	return c.runLibraryGlobalAction(ctx, "DeleteCaches", "library/caches", http.MethodDelete)
+}
+
+func (c *Client) runLibraryGlobalAction(ctx context.Context, op, path, method string) error {
+	err := c.executeWithRetry(ctx, op, func() error {
+		urlStr := fmt.Sprintf("%s/%s?X-Plex-Token=%s", c.serverURL, strings.TrimPrefix(path, "/"), c.token)
+		req, reqErr := http.NewRequestWithContext(ctx, method, urlStr, nil)
+		if reqErr != nil {
+			return fmt.Errorf("failed to create request: %w", reqErr)
+		}
+
+		resp, doErr := c.httpClient.Do(req)
+		if doErr != nil {
+			return fmt.Errorf("failed to make request: %w", doErr)
+		}
+		defer resp.Body.Close()
+
+		switch resp.StatusCode {
+		case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent:
+			return nil
+		default:
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+	})
+	if err != nil {
+		return &PlexError{
+			Op:  op,
+			Err: err,
+		}
+	}
+
+	return nil
+}
+
+func (c *Client) RefreshLibrarySection(ctx context.Context, sectionID string) error {
+	return c.RefreshSection(ctx, sectionID)
+}
+
+func (c *Client) EmptyTrashLibrarySection(ctx context.Context, sectionID string) error {
+	return c.runLibrarySectionAction(ctx, "EmptyTrashLibrarySection", sectionID, "emptyTrash", http.MethodPut)
+}
+
+func (c *Client) runLibrarySectionAction(ctx context.Context, op, sectionID, actionPath, method string) error {
+	if sectionID == "" {
+		return &PlexError{
+			Op:  op,
+			Err: fmt.Errorf("section ID is required"),
+		}
+	}
+
+	err := c.executeWithRetry(ctx, op, func() error {
+		urlStr := fmt.Sprintf("%s/library/sections/%s/%s?X-Plex-Token=%s", c.serverURL, sectionID, actionPath, c.token)
+		req, reqErr := http.NewRequestWithContext(ctx, method, urlStr, nil)
+		if reqErr != nil {
+			return fmt.Errorf("failed to create request: %w", reqErr)
+		}
+
+		resp, doErr := c.httpClient.Do(req)
+		if doErr != nil {
+			return fmt.Errorf("failed to make request: %w", doErr)
+		}
+		defer resp.Body.Close()
+
+		switch resp.StatusCode {
+		case http.StatusOK, http.StatusAccepted, http.StatusNoContent:
+			return nil
+		default:
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+	})
+	if err != nil {
+		return &PlexError{
+			Op:      op,
+			Section: sectionID,
+			Err:     err,
+		}
+	}
+
+	return nil
+}
+
 func (c *Client) GetServerURL() string {
 	return c.serverURL
 }
