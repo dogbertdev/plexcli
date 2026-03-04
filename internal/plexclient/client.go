@@ -2628,10 +2628,11 @@ func (c *Client) GetBackgroundTasks(ctx context.Context) ([]BackgroundTask, erro
 }
 
 func parseOptionalFloat(raw string) (*float64, error) {
-	if strings.TrimSpace(raw) == "" {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
 		return nil, nil
 	}
-	v, err := strconv.ParseFloat(raw, 64)
+	v, err := strconv.ParseFloat(trimmed, 64)
 	if err != nil {
 		return nil, err
 	}
@@ -2639,10 +2640,11 @@ func parseOptionalFloat(raw string) (*float64, error) {
 }
 
 func parseOptionalInt64(raw string) (*int64, error) {
-	if strings.TrimSpace(raw) == "" {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
 		return nil, nil
 	}
-	v, err := strconv.ParseInt(raw, 10, 64)
+	v, err := strconv.ParseInt(trimmed, 10, 64)
 	if err != nil {
 		return nil, err
 	}
