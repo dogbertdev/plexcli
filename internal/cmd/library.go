@@ -18,7 +18,7 @@ type LibraryCmd struct {
 	List   LibrariesCmd     `cmd:"" help:"List library sections"`
 	Update LibraryUpdateCmd `cmd:"" help:"Refresh one library section or all sections"`
 	Clean  LibraryCleanCmd  `cmd:"" help:"Empty trash for one library section or all sections"`
-	Status LibraryStatusCmd `cmd:"" help:"Show active library-related tasks and activities"`
+	Status LibraryStatusCmd `cmd:"" help:"Show active server tasks and activities"`
 }
 
 type LibraryUpdateCmd struct {
@@ -185,11 +185,6 @@ func (c *LibraryStatusCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) 
 			Details:     formatBackgroundDetails(task.Remaining, task.Speed),
 			Cancellable: false,
 		})
-	}
-
-	if len(items) == 0 {
-		fmt.Fprintln(u.Err(), "No active library tasks")
-		return nil
 	}
 
 	return c.output(u.Out(), items)
