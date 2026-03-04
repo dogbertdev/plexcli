@@ -34,6 +34,7 @@ type CLI struct {
 
 	// Subcommands
 	Unwatched    cmd.UnwatchedCmd        `cmd:"" help:"List unwatched items in the library"`
+	Unmatched    cmd.UnmatchedCmd        `cmd:"" help:"List unmatched items in the library"`
 	Recently     cmd.RecentlyWatchedCmd  `cmd:"" name:"recently-watched" help:"List recently watched items"`
 	Added        cmd.RecentlyAddedCmd    `cmd:"" name:"recently-added" help:"List recently added items"`
 	Duplicates   cmd.DuplicatesCmd       `cmd:"" help:"Find duplicate media files"`
@@ -149,6 +150,7 @@ func main() {
 
 func applyOutputFormat(cli *CLI, format string) {
 	cli.Unwatched.Output = format
+	cli.Unmatched.Output = format
 	cli.Recently.Output = format
 	cli.Added.Output = format
 	cli.Duplicates.Output = format
