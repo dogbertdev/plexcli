@@ -103,6 +103,31 @@ plex --help
 plex cache clear
 ```
 
+#### Manage Library Maintenance
+
+```bash
+# List all library sections
+plex library list
+
+# List only movie sections
+plex library list --type movie
+
+# Refresh all sections
+plex library update
+
+# Refresh one section
+plex library update 1
+
+# Clean all sections (empty trash + maintenance tasks)
+plex library clean
+
+# Clean one section (plus global maintenance tasks)
+plex library clean 1
+
+# Show active activities/background tasks
+plex library status
+```
+
 #### Authenticate
 
 ```bash

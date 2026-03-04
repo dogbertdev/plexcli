@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -683,6 +684,144 @@ func (c *Client) GetSections(ctx context.Context) ([]Library, error) {
 	}
 
 	return libraries, nil
+}
+
+func (c *Client) RefreshSection(ctx context.Context, sectionID string) error {
+	return c.runLibrarySectionAction(ctx, "RefreshSection", sectionID, "refresh", http.MethodPost)
+}
+
+func (c *Client) RefreshAllSections(ctx context.Context) error {
+	return c.runLibraryGlobalAction(ctx, "RefreshAllSections", "library/sections/refresh", http.MethodPost)
+}
+
+func (c *Client) CancelRefresh(ctx context.Context, sectionID string) error {
+	return c.runLibrarySectionAction(ctx, "CancelRefresh", sectionID, "refresh", http.MethodDelete)
+}
+
+func (c *Client) StartAnalysis(ctx context.Context, sectionID string) error {
+	return c.runLibrarySectionAction(ctx, "StartAnalysis", sectionID, "analyze", http.MethodPut)
+}
+
+func (c *Client) AnalyzeMetadata(ctx context.Context, ids string) error {
+	if strings.TrimSpace(ids) == "" {
+		return &PlexError{
+			Op:  "AnalyzeMetadata",
+			Err: fmt.Errorf("ids are required"),
+		}
+	}
+
+	escapedIDs := url.PathEscape(ids)
+	return c.runLibraryGlobalAction(ctx, "AnalyzeMetadata", fmt.Sprintf("library/metadata/%s/analyze", escapedIDs), http.MethodPut)
+}
+
+func (c *Client) GenerateThumbs(ctx context.Context, ids string) error {
+	if strings.TrimSpace(ids) == "" {
+		return &PlexError{
+			Op:  "GenerateThumbs",
+			Err: fmt.Errorf("ids are required"),
+		}
+	}
+
+	escapedIDs := url.PathEscape(ids)
+	return c.runLibraryGlobalAction(ctx, "GenerateThumbs", fmt.Sprintf("library/metadata/%s/chapterThumbs", escapedIDs), http.MethodPut)
+}
+
+func (c *Client) EmptyTrash(ctx context.Context, sectionID string) error {
+	return c.runLibrarySectionAction(ctx, "EmptyTrash", sectionID, "emptyTrash", http.MethodPut)
+}
+
+func (c *Client) CleanSection(ctx context.Context, sectionID string) error {
+	return c.EmptyTrash(ctx, sectionID)
+}
+
+func (c *Client) OptimizeDatabase(ctx context.Context) error {
+	return c.runLibraryGlobalAction(ctx, "OptimizeDatabase", "library/optimize", http.MethodPut)
+}
+
+func (c *Client) CleanBundles(ctx context.Context) error {
+	return c.runLibraryGlobalAction(ctx, "CleanBundles", "library/clean/bundles", http.MethodPut)
+}
+
+func (c *Client) DeleteCaches(ctx context.Context) error {
+	return c.runLibraryGlobalAction(ctx, "DeleteCaches", "library/caches", http.MethodDelete)
+}
+
+func (c *Client) runLibraryGlobalAction(ctx context.Context, op, path, method string) error {
+	err := c.executeWithRetry(ctx, op, func() error {
+		urlStr := fmt.Sprintf("%s/%s?X-Plex-Token=%s", c.serverURL, strings.TrimPrefix(path, "/"), c.token)
+		req, reqErr := http.NewRequestWithContext(ctx, method, urlStr, nil)
+		if reqErr != nil {
+			return fmt.Errorf("failed to create request: %w", reqErr)
+		}
+
+		resp, doErr := c.httpClient.Do(req)
+		if doErr != nil {
+			return fmt.Errorf("failed to make request: %w", doErr)
+		}
+		defer resp.Body.Close()
+
+		switch resp.StatusCode {
+		case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent:
+			return nil
+		default:
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+	})
+	if err != nil {
+		return &PlexError{
+			Op:  op,
+			Err: err,
+		}
+	}
+
+	return nil
+}
+
+func (c *Client) RefreshLibrarySection(ctx context.Context, sectionID string) error {
+	return c.RefreshSection(ctx, sectionID)
+}
+
+func (c *Client) EmptyTrashLibrarySection(ctx context.Context, sectionID string) error {
+	return c.runLibrarySectionAction(ctx, "EmptyTrashLibrarySection", sectionID, "emptyTrash", http.MethodPut)
+}
+
+func (c *Client) runLibrarySectionAction(ctx context.Context, op, sectionID, actionPath, method string) error {
+	if sectionID == "" {
+		return &PlexError{
+			Op:  op,
+			Err: fmt.Errorf("section ID is required"),
+		}
+	}
+
+	err := c.executeWithRetry(ctx, op, func() error {
+		urlStr := fmt.Sprintf("%s/library/sections/%s/%s?X-Plex-Token=%s", c.serverURL, sectionID, actionPath, c.token)
+		req, reqErr := http.NewRequestWithContext(ctx, method, urlStr, nil)
+		if reqErr != nil {
+			return fmt.Errorf("failed to create request: %w", reqErr)
+		}
+
+		resp, doErr := c.httpClient.Do(req)
+		if doErr != nil {
+			return fmt.Errorf("failed to make request: %w", doErr)
+		}
+		defer resp.Body.Close()
+
+		switch resp.StatusCode {
+		case http.StatusOK, http.StatusAccepted, http.StatusNoContent:
+			return nil
+		default:
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+	})
+	if err != nil {
+		return &PlexError{
+			Op:      op,
+			Section: sectionID,
+			Err:     err,
+		}
+	}
+
+	return nil
 }
 
 func (c *Client) GetServerURL() string {
@@ -2091,6 +2230,25 @@ type Account struct {
 	Name string `json:"name"`
 }
 
+// ActivityTask represents an in-progress Plex activity.
+type ActivityTask struct {
+	UUID        string   `json:"uuid"`
+	Type        string   `json:"type"`
+	Title       string   `json:"title"`
+	Subtitle    string   `json:"subtitle"`
+	Progress    *float64 `json:"progress,omitempty"`
+	Cancellable bool     `json:"cancellable"`
+}
+
+// BackgroundTask represents an in-progress background task.
+type BackgroundTask struct {
+	Type      string   `json:"type"`
+	Title     string   `json:"title"`
+	Progress  *float64 `json:"progress,omitempty"`
+	Remaining *int64   `json:"remaining,omitempty"`
+	Speed     *float64 `json:"speed,omitempty"`
+}
+
 // GetActiveSessions returns currently active playback sessions
 func (c *Client) GetActiveSessions(ctx context.Context) ([]ActiveSession, error) {
 	var sessions []ActiveSession
@@ -2304,4 +2462,175 @@ func (c *Client) GetAccounts(ctx context.Context) ([]Account, error) {
 	}
 
 	return accounts, nil
+}
+
+// GetActivities returns currently running server activities.
+func (c *Client) GetActivities(ctx context.Context) ([]ActivityTask, error) {
+	var activities []ActivityTask
+
+	err := c.executeWithRetry(ctx, "GetActivities", func() error {
+		urlStr := fmt.Sprintf("%s/activities?X-Plex-Token=%s", c.serverURL, c.token)
+		req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		var container struct {
+			XMLName    xml.Name `xml:"MediaContainer"`
+			Activities []struct {
+				UUID        string `xml:"uuid,attr"`
+				Type        string `xml:"type,attr"`
+				Title       string `xml:"title,attr"`
+				Subtitle    string `xml:"subtitle,attr"`
+				ProgressRaw string `xml:"progress,attr"`
+				CancelRaw   string `xml:"cancellable,attr"`
+			} `xml:"Activity"`
+		}
+
+		if err := xml.Unmarshal(body, &container); err != nil {
+			return fmt.Errorf("failed to parse response: %w", err)
+		}
+
+		activities = nil
+		for _, a := range container.Activities {
+			activities = append(activities, ActivityTask{
+				UUID:        a.UUID,
+				Type:        a.Type,
+				Title:       a.Title,
+				Subtitle:    a.Subtitle,
+				Progress:    parseOptionalFloat(a.ProgressRaw),
+				Cancellable: parseBoolAttr(a.CancelRaw),
+			})
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, &PlexError{
+			Op:  "GetActivities",
+			Err: err,
+		}
+	}
+
+	return activities, nil
+}
+
+// GetBackgroundTasks returns currently running background tasks.
+func (c *Client) GetBackgroundTasks(ctx context.Context) ([]BackgroundTask, error) {
+	var tasks []BackgroundTask
+
+	err := c.executeWithRetry(ctx, "GetBackgroundTasks", func() error {
+		urlStr := fmt.Sprintf("%s/status/sessions/background?X-Plex-Token=%s", c.serverURL, c.token)
+		req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		type rawTask struct {
+			Type         string `xml:"type,attr"`
+			Title        string `xml:"title,attr"`
+			ProgressRaw  string `xml:"progress,attr"`
+			RemainingRaw string `xml:"remaining,attr"`
+			SpeedRaw     string `xml:"speed,attr"`
+		}
+
+		var container struct {
+			XMLName          xml.Name  `xml:"MediaContainer"`
+			TranscodeJobs    []rawTask `xml:"TranscodeJob"`
+			TranscodeSession []rawTask `xml:"TranscodeSession"`
+		}
+
+		if err := xml.Unmarshal(body, &container); err != nil {
+			return fmt.Errorf("failed to parse response: %w", err)
+		}
+
+		appendTask := func(rt rawTask) {
+			tasks = append(tasks, BackgroundTask{
+				Type:      rt.Type,
+				Title:     rt.Title,
+				Progress:  parseOptionalFloat(rt.ProgressRaw),
+				Remaining: parseOptionalInt64(rt.RemainingRaw),
+				Speed:     parseOptionalFloat(rt.SpeedRaw),
+			})
+		}
+
+		tasks = nil
+		for _, t := range container.TranscodeJobs {
+			appendTask(t)
+		}
+		for _, t := range container.TranscodeSession {
+			appendTask(t)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, &PlexError{
+			Op:  "GetBackgroundTasks",
+			Err: err,
+		}
+	}
+
+	return tasks, nil
+}
+
+func parseOptionalFloat(raw string) *float64 {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return nil
+	}
+	return &v
+}
+
+func parseOptionalInt64(raw string) *int64 {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return nil
+	}
+	return &v
+}
+
+func parseBoolAttr(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
 }
