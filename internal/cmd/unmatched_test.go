@@ -78,6 +78,34 @@ func TestUnmatchedCmd_findUnmatchedTypeFilter(t *testing.T) {
 	}
 }
 
+func TestUnmatchedCmd_findUnmatchedEpisodeFilterMapsToShow(t *testing.T) {
+	items := []*components.Metadata{
+		{
+			Title: "Show Unmatched",
+			Type:  "show",
+			AdditionalProperties: map[string]any{
+				"guid": "local://show-1",
+			},
+		},
+		{
+			Title: "Movie Unmatched",
+			Type:  "movie",
+			AdditionalProperties: map[string]any{
+				"guid": "local://movie-1",
+			},
+		},
+	}
+
+	cmd := &UnmatchedCmd{Type: "episode"}
+	got := cmd.findUnmatched(items)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 unmatched item for episode filter, got %d", len(got))
+	}
+	if got[0].Type != "show" {
+		t.Fatalf("expected show type for episode filter, got %q", got[0].Type)
+	}
+}
+
 func TestIsMetadataUnmatched(t *testing.T) {
 	tests := []struct {
 		name string

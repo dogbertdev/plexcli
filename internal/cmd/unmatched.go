@@ -61,7 +61,7 @@ func (c *UnmatchedCmd) fetchItems(ctx context.Context, client *plexclient.Client
 
 func (c *UnmatchedCmd) findUnmatched(items []*components.Metadata) []UnmatchedInfo {
 	results := make([]UnmatchedInfo, 0)
-	filterType := c.Type
+	filterType := normalizeUnmatchedType(c.Type)
 	if filterType == "" {
 		filterType = "all"
 	}
@@ -92,6 +92,13 @@ func (c *UnmatchedCmd) findUnmatched(items []*components.Metadata) []UnmatchedIn
 	}
 
 	return results
+}
+
+func normalizeUnmatchedType(filterType string) string {
+	if filterType == "episode" {
+		return "show"
+	}
+	return filterType
 }
 
 func (c *UnmatchedCmd) outputResults(w io.Writer, results []UnmatchedInfo) error {
