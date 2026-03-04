@@ -703,27 +703,27 @@ func (c *Client) StartAnalysis(ctx context.Context, sectionID string) error {
 }
 
 func (c *Client) AnalyzeMetadata(ctx context.Context, ids string) error {
-	if strings.TrimSpace(ids) == "" {
+	encodedIDs, err := encodeMetadataIDs(ids)
+	if err != nil {
 		return &PlexError{
 			Op:  "AnalyzeMetadata",
-			Err: fmt.Errorf("ids are required"),
+			Err: err,
 		}
 	}
 
-	escapedIDs := url.PathEscape(ids)
-	return c.runLibraryGlobalAction(ctx, "AnalyzeMetadata", fmt.Sprintf("library/metadata/%s/analyze", escapedIDs), http.MethodPut)
+	return c.runLibraryGlobalAction(ctx, "AnalyzeMetadata", fmt.Sprintf("library/metadata/%s/analyze", encodedIDs), http.MethodPut)
 }
 
 func (c *Client) GenerateThumbs(ctx context.Context, ids string) error {
-	if strings.TrimSpace(ids) == "" {
+	encodedIDs, err := encodeMetadataIDs(ids)
+	if err != nil {
 		return &PlexError{
 			Op:  "GenerateThumbs",
-			Err: fmt.Errorf("ids are required"),
+			Err: err,
 		}
 	}
 
-	escapedIDs := url.PathEscape(ids)
-	return c.runLibraryGlobalAction(ctx, "GenerateThumbs", fmt.Sprintf("library/metadata/%s/chapterThumbs", escapedIDs), http.MethodPut)
+	return c.runLibraryGlobalAction(ctx, "GenerateThumbs", fmt.Sprintf("library/metadata/%s/chapterThumbs", encodedIDs), http.MethodPut)
 }
 
 func (c *Client) EmptyTrash(ctx context.Context, sectionID string) error {
@@ -2508,12 +2508,17 @@ func (c *Client) GetActivities(ctx context.Context) ([]ActivityTask, error) {
 
 		activities = nil
 		for _, a := range container.Activities {
+			progress, parseErr := parseOptionalFloat(a.ProgressRaw)
+			if parseErr != nil {
+				return fmt.Errorf("invalid activity progress %q: %w", a.ProgressRaw, parseErr)
+			}
+
 			activities = append(activities, ActivityTask{
 				UUID:        a.UUID,
 				Type:        a.Type,
 				Title:       a.Title,
 				Subtitle:    a.Subtitle,
-				Progress:    parseOptionalFloat(a.ProgressRaw),
+				Progress:    progress,
 				Cancellable: parseBoolAttr(a.CancelRaw),
 			})
 		}
@@ -2574,22 +2579,40 @@ func (c *Client) GetBackgroundTasks(ctx context.Context) ([]BackgroundTask, erro
 			return fmt.Errorf("failed to parse response: %w", err)
 		}
 
-		appendTask := func(rt rawTask) {
+		appendTask := func(rt rawTask) error {
+			progress, parseErr := parseOptionalFloat(rt.ProgressRaw)
+			if parseErr != nil {
+				return fmt.Errorf("invalid task progress %q: %w", rt.ProgressRaw, parseErr)
+			}
+			remaining, parseErr := parseOptionalInt64(rt.RemainingRaw)
+			if parseErr != nil {
+				return fmt.Errorf("invalid task remaining %q: %w", rt.RemainingRaw, parseErr)
+			}
+			speed, parseErr := parseOptionalFloat(rt.SpeedRaw)
+			if parseErr != nil {
+				return fmt.Errorf("invalid task speed %q: %w", rt.SpeedRaw, parseErr)
+			}
+
 			tasks = append(tasks, BackgroundTask{
 				Type:      rt.Type,
 				Title:     rt.Title,
-				Progress:  parseOptionalFloat(rt.ProgressRaw),
-				Remaining: parseOptionalInt64(rt.RemainingRaw),
-				Speed:     parseOptionalFloat(rt.SpeedRaw),
+				Progress:  progress,
+				Remaining: remaining,
+				Speed:     speed,
 			})
+			return nil
 		}
 
 		tasks = nil
 		for _, t := range container.TranscodeJobs {
-			appendTask(t)
+			if appendErr := appendTask(t); appendErr != nil {
+				return appendErr
+			}
 		}
 		for _, t := range container.TranscodeSession {
-			appendTask(t)
+			if appendErr := appendTask(t); appendErr != nil {
+				return appendErr
+			}
 		}
 
 		return nil
@@ -2604,26 +2627,26 @@ func (c *Client) GetBackgroundTasks(ctx context.Context) ([]BackgroundTask, erro
 	return tasks, nil
 }
 
-func parseOptionalFloat(raw string) *float64 {
+func parseOptionalFloat(raw string) (*float64, error) {
 	if strings.TrimSpace(raw) == "" {
-		return nil
+		return nil, nil
 	}
 	v, err := strconv.ParseFloat(raw, 64)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return &v
+	return &v, nil
 }
 
-func parseOptionalInt64(raw string) *int64 {
+func parseOptionalInt64(raw string) (*int64, error) {
 	if strings.TrimSpace(raw) == "" {
-		return nil
+		return nil, nil
 	}
 	v, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return &v
+	return &v, nil
 }
 
 func parseBoolAttr(raw string) bool {
@@ -2633,4 +2656,23 @@ func parseBoolAttr(raw string) bool {
 	default:
 		return false
 	}
+}
+
+func encodeMetadataIDs(ids string) (string, error) {
+	trimmed := strings.TrimSpace(ids)
+	if trimmed == "" {
+		return "", fmt.Errorf("ids are required")
+	}
+
+	parts := strings.Split(trimmed, ",")
+	encoded := make([]string, 0, len(parts))
+	for _, part := range parts {
+		id := strings.TrimSpace(part)
+		if id == "" {
+			return "", fmt.Errorf("ids contain an empty segment")
+		}
+		encoded = append(encoded, url.PathEscape(id))
+	}
+
+	return strings.Join(encoded, ","), nil
 }
