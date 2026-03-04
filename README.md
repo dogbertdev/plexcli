@@ -160,6 +160,19 @@ plex unwatched --type movie
 plex unwatched --limit 20
 ```
 
+#### List Unmatched Items
+
+```bash
+# Show all unmatched items
+plex unmatched
+
+# Show unmatched movies only
+plex unmatched --type movie
+
+# Limit results
+plex unmatched --limit 20
+```
+
 #### List Recently Watched
 
 ```bash

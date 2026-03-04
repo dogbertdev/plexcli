@@ -7,6 +7,7 @@ This document captures implementation details that are easy to forget and are va
 Root command is defined in `cmd/plex/main.go` and currently includes:
 
 - `unwatched`
+- `unmatched`
 - `recently-watched`
 - `recently-added`
 - `duplicates`
