@@ -123,6 +123,9 @@ plex library clean
 
 # Clean one section (plus global maintenance tasks)
 plex library clean 1
+
+# Show active activities/background tasks
+plex library status
 ```
 
 #### Authenticate

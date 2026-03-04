@@ -162,6 +162,7 @@ func applyOutputFormat(cli *CLI, format string) {
 	cli.Library.List.Output = format
 	cli.Library.Update.Output = format
 	cli.Library.Clean.Output = format
+	cli.Library.Status.Output = format
 	cli.ServerInfo.Output = format
 	cli.Playlist.List.Output = format
 	cli.Playlist.Create.Output = format

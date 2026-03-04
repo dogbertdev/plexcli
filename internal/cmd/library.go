@@ -18,6 +18,7 @@ type LibraryCmd struct {
 	List   LibrariesCmd     `cmd:"" help:"List library sections"`
 	Update LibraryUpdateCmd `cmd:"" help:"Refresh one library section or all sections"`
 	Clean  LibraryCleanCmd  `cmd:"" help:"Empty trash for one library section or all sections"`
+	Status LibraryStatusCmd `cmd:"" help:"Show active library-related tasks and activities"`
 }
 
 type LibraryUpdateCmd struct {
@@ -30,11 +31,24 @@ type LibraryCleanCmd struct {
 	Output  string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
+type LibraryStatusCmd struct {
+	Output string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+}
+
 type LibraryActionResult struct {
 	Action  string `json:"action"`
 	ID      string `json:"id"`
 	Title   string `json:"title"`
 	Outcome string `json:"outcome"`
+}
+
+type LibraryStatusItem struct {
+	Source      string `json:"source"`
+	Type        string `json:"type"`
+	Title       string `json:"title"`
+	Progress    string `json:"progress"`
+	Details     string `json:"details"`
+	Cancellable bool   `json:"cancellable"`
 }
 
 func (c *LibraryUpdateCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
@@ -134,6 +148,72 @@ func (c *LibraryCleanCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) e
 	return outputLibraryActionResults(u.Out(), c.Output, results)
 }
 
+func (c *LibraryStatusCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
+	cc, err := NewClientContext(cfg)
+	if err != nil {
+		return err
+	}
+	defer cc.Cancel()
+
+	activities, err := cc.Client.GetActivities(cc.Ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get activities: %w", err)
+	}
+
+	backgroundTasks, err := cc.Client.GetBackgroundTasks(cc.Ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get background tasks: %w", err)
+	}
+
+	items := make([]LibraryStatusItem, 0, len(activities)+len(backgroundTasks))
+	for _, activity := range activities {
+		items = append(items, LibraryStatusItem{
+			Source:      "activity",
+			Type:        defaultString(activity.Type, "unknown"),
+			Title:       firstNonEmpty(activity.Title, activity.Subtitle, "-"),
+			Progress:    formatTaskProgress(activity.Progress),
+			Details:     defaultString(activity.Subtitle, "-"),
+			Cancellable: activity.Cancellable,
+		})
+	}
+	for _, task := range backgroundTasks {
+		items = append(items, LibraryStatusItem{
+			Source:      "background",
+			Type:        defaultString(task.Type, "unknown"),
+			Title:       defaultString(task.Title, "-"),
+			Progress:    formatTaskProgress(task.Progress),
+			Details:     formatBackgroundDetails(task.Remaining, task.Speed),
+			Cancellable: false,
+		})
+	}
+
+	if len(items) == 0 {
+		fmt.Fprintln(u.Err(), "No active library tasks")
+		return nil
+	}
+
+	return c.output(u.Out(), items)
+}
+
+func (c *LibraryStatusCmd) output(w io.Writer, items []LibraryStatusItem) error {
+	formatter := outfmt.NewFormatter(outfmt.Format(c.Output))
+
+	header := []string{"SOURCE", "TYPE", "TITLE", "PROGRESS", "DETAILS", "CANCELLABLE"}
+	rows := make([][]string, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, []string{
+			item.Source,
+			item.Type,
+			item.Title,
+			item.Progress,
+			item.Details,
+			fmt.Sprintf("%t", item.Cancellable),
+		})
+	}
+
+	return formatter.Format(w, header, rows, items)
+}
+
 func runLibrarySectionAction(
 	sectionSelector string,
 	output string,
@@ -188,6 +268,36 @@ func formatTaskProgress(progress *float64) string {
 		return "indeterminate"
 	}
 	return fmt.Sprintf("%.0f%%", *progress)
+}
+
+func formatBackgroundDetails(remaining *int64, speed *float64) string {
+	parts := make([]string, 0, 2)
+	if remaining != nil {
+		parts = append(parts, fmt.Sprintf("remaining=%ds", *remaining))
+	}
+	if speed != nil {
+		parts = append(parts, fmt.Sprintf("speed=%.2fx", *speed))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func defaultString(v, fallback string) string {
+	if strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	return v
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func targetLibrarySections(sections []plexclient.Library, sectionSelector string) ([]plexclient.Library, error) {
