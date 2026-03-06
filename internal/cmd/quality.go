@@ -93,7 +93,7 @@ func (c *QualityCheckCmd) extractQualityInfo(item *components.Metadata) QualityI
 	}
 
 	if item.Year != nil {
-		info.Year = int(*item.Year)
+		info.Year = *item.Year
 	}
 
 	if len(item.Media) > 0 {
@@ -102,11 +102,11 @@ func (c *QualityCheckCmd) extractQualityInfo(item *components.Metadata) QualityI
 		info.Resolution = anyToString(media.VideoResolution)
 
 		if media.Bitrate != nil {
-			info.Bitrate = int(*media.Bitrate)
+			info.Bitrate = *media.Bitrate
 		}
 
 		if media.Width != nil {
-			info.Width = int(*media.Width)
+			info.Width = *media.Width
 		}
 
 		if media.Height != nil {
