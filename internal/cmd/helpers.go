@@ -32,5 +32,5 @@ func intPtrToInt(v *int) int {
 	if v == nil {
 		return 0
 	}
-	return int(*v)
+	return *v
 }

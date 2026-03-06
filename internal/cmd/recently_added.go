@@ -110,7 +110,7 @@ func (c *RecentlyAddedCmd) processItems(items []itemWithSection) []RecentlyAdded
 		}
 
 		if item.Year != nil {
-			result.Year = int(*item.Year)
+			result.Year = *item.Year
 		}
 
 		results = append(results, result)
