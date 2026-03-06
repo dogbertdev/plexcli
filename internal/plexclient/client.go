@@ -180,11 +180,14 @@ func (c *Client) executeWithRetry(ctx context.Context, op string, fn func() erro
 }
 
 type rawMediaMetadata struct {
-	RatingKey        string  `json:"ratingKey"`
-	Key              string  `json:"key"`
-	GUID             *string `json:"guid"`
-	Title            string  `json:"title"`
-	Type             string  `json:"type"`
+	RatingKey string  `json:"ratingKey"`
+	Key       string  `json:"key"`
+	Title     string  `json:"title"`
+	Type      string  `json:"type"`
+	GUID      *string `json:"guid"`
+	Guid      []struct {
+		ID string `json:"id"`
+	} `json:"Guid"`
 	Year             *int    `json:"year"`
 	AddedAt          int64   `json:"addedAt"`
 	ViewCount        *int    `json:"viewCount"`
@@ -210,9 +213,6 @@ type rawMediaMetadata struct {
 		AudioCodec      *string `json:"audioCodec"`
 		AudioChannels   *int    `json:"audioChannels"`
 	} `json:"Media"`
-	Guid []struct {
-		ID string `json:"id"`
-	} `json:"Guid"`
 	Summary *string `json:"summary"`
 	Thumb   *string `json:"thumb"`
 }
@@ -391,21 +391,22 @@ func convertRawToMetadata(raw rawMediaMetadata) *components.Metadata {
 		}
 	}
 	if raw.GUID != nil {
+		meta.GUID = raw.GUID
 		if meta.AdditionalProperties == nil {
-			meta.AdditionalProperties = make(map[string]any)
+			meta.AdditionalProperties = map[string]any{}
 		}
 		meta.AdditionalProperties["guid"] = *raw.GUID
 	}
 	if len(raw.Guid) > 0 {
-		guidTags := make([]components.Tag, 0, len(raw.Guid))
+		guids := make([]components.Guids, 0, len(raw.Guid))
 		for _, guid := range raw.Guid {
 			if strings.TrimSpace(guid.ID) == "" {
 				continue
 			}
-			guidTags = append(guidTags, components.Tag{Tag: guid.ID})
+			guids = append(guids, components.Guids{ID: guid.ID})
 		}
-		if len(guidTags) > 0 {
-			meta.GUID = guidTags
+		if len(guids) > 0 {
+			meta.Guids = guids
 		}
 	}
 

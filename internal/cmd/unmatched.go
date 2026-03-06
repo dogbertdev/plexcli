@@ -86,7 +86,7 @@ func (c *UnmatchedCmd) findUnmatched(items []*components.Metadata) []UnmatchedIn
 			GUID:      metadataGUID(item),
 		}
 		if item.Year != nil {
-			info.Year = int(*item.Year)
+			info.Year = *item.Year
 		}
 		results = append(results, info)
 	}
@@ -131,12 +131,12 @@ func isMetadataUnmatched(item *components.Metadata) bool {
 		return strings.HasPrefix(guid, "local://")
 	}
 
-	if len(item.GUID) == 0 {
+	if len(item.Guids) == 0 {
 		return true
 	}
 
-	for _, g := range item.GUID {
-		tag := strings.ToLower(strings.TrimSpace(anyToString(g.Tag)))
+	for _, g := range item.Guids {
+		tag := strings.ToLower(strings.TrimSpace(g.ID))
 		if tag == "" {
 			continue
 		}
@@ -149,7 +149,13 @@ func isMetadataUnmatched(item *components.Metadata) bool {
 }
 
 func metadataGUID(item *components.Metadata) string {
-	if item == nil || item.AdditionalProperties == nil {
+	if item == nil {
+		return ""
+	}
+	if item.GUID != nil && strings.TrimSpace(*item.GUID) != "" {
+		return *item.GUID
+	}
+	if item.AdditionalProperties == nil {
 		return ""
 	}
 	guid, ok := item.AdditionalProperties["guid"]
