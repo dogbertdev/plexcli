@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/dogbertdev/plexcli/internal/auth"
@@ -90,6 +92,99 @@ func TestAuthServersRunRequiresToken(t *testing.T) {
 	err := cmd.Run(nil, u, cfg)
 	if err == nil {
 		t.Fatal("expected error when token is missing")
+	}
+}
+
+func TestAuthTokenInfoRunRequiresToken(t *testing.T) {
+	out := &bytes.Buffer{}
+	errOut := &bytes.Buffer{}
+	u := ui.New(ui.Options{Out: out, Err: errOut, ColorMode: ui.ColorNever})
+
+	cmd := AuthTokenInfoCmd{}
+	cfg := &config.Config{}
+	err := cmd.Run(nil, u, cfg)
+	if err == nil {
+		t.Fatal("expected error when token is missing")
+	}
+}
+
+func TestAuthTokenInfoOutputTable(t *testing.T) {
+	out := &bytes.Buffer{}
+	cmd := AuthTokenInfoCmd{Output: "table"}
+
+	info := &auth.TokenInfo{
+		Account: auth.TokenAccountInfo{
+			Title:              "Paul",
+			Username:           "paul",
+			Email:              "paul@example.com",
+			FriendlyName:       "Paul Mansfield",
+			Home:               true,
+			HomeAdmin:          true,
+			Confirmed:          true,
+			HasPassword:        true,
+			TwoFactorEnabled:   true,
+			SubscriptionActive: true,
+			SubscriptionStatus: "Active",
+			SubscriptionPlan:   "Lifetime Plex Pass",
+		},
+		Resources: []auth.TokenResourceInfo{
+			{
+				Name:             "MediaBox",
+				Product:          "Plex Media Server",
+				Provides:         "server",
+				ClientIdentifier: "server-123",
+				Owned:            true,
+				Home:             true,
+				Presence:         true,
+				ConnectionCount:  1,
+				Connections: []auth.TokenConnectionInfo{
+					{
+						Protocol: "https",
+						URI:      "https://10.0.0.5:32400",
+						Local:    true,
+					},
+				},
+			},
+		},
+	}
+
+	if err := cmd.output(out, info); err != nil {
+		t.Fatalf("output returned error: %v", err)
+	}
+
+	got := out.String()
+	for _, want := range []string{"TITLE\tPaul", "EMAIL\tpaul@example.com", "MediaBox", "server-123", "https://10.0.0.5:32400"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected output to contain %q, got:\n%s", want, got)
+		}
+	}
+}
+
+func TestAuthTokenInfoOutputJSON(t *testing.T) {
+	out := &bytes.Buffer{}
+	cmd := AuthTokenInfoCmd{Output: "json"}
+
+	info := &auth.TokenInfo{
+		Account: auth.TokenAccountInfo{
+			Title:    "Paul",
+			Username: "paul",
+			Email:    "paul@example.com",
+		},
+		Resources: []auth.TokenResourceInfo{
+			{Name: "MediaBox", ClientIdentifier: "server-123"},
+		},
+	}
+
+	if err := cmd.output(out, info); err != nil {
+		t.Fatalf("output returned error: %v", err)
+	}
+
+	var decoded auth.TokenInfo
+	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+		t.Fatalf("failed to decode JSON output: %v", err)
+	}
+	if decoded.Account.Title != "Paul" || len(decoded.Resources) != 1 || decoded.Resources[0].ClientIdentifier != "server-123" {
+		t.Fatalf("unexpected JSON payload: %+v", decoded)
 	}
 }
 

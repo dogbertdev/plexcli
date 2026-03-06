@@ -20,7 +20,7 @@ func TestDuplicatesCmd_generateKey(t *testing.T) {
 			item: &components.Metadata{
 				Title: "The Matrix",
 				Type:  "movie",
-				Year:  int64Ptr(1999),
+				Year:  intPtr(1999),
 			},
 			expected: "movie:the matrix:1999",
 		},
@@ -101,35 +101,35 @@ func TestDuplicatesCmd_findDuplicates(t *testing.T) {
 		{
 			name: "no duplicates",
 			items: []*components.Metadata{
-				{Title: "Movie 1", Type: "movie", Year: int64Ptr(2020), RatingKey: stringPtr("1")},
-				{Title: "Movie 2", Type: "movie", Year: int64Ptr(2021), RatingKey: stringPtr("2")},
+				{Title: "Movie 1", Type: "movie", Year: intPtr(2020), RatingKey: stringPtr("1")},
+				{Title: "Movie 2", Type: "movie", Year: intPtr(2021), RatingKey: stringPtr("2")},
 			},
 			expected: 0,
 		},
 		{
 			name: "one duplicate pair",
 			items: []*components.Metadata{
-				{Title: "The Matrix", Type: "movie", Year: int64Ptr(1999), RatingKey: stringPtr("1")},
-				{Title: "The Matrix", Type: "movie", Year: int64Ptr(1999), RatingKey: stringPtr("2")},
+				{Title: "The Matrix", Type: "movie", Year: intPtr(1999), RatingKey: stringPtr("1")},
+				{Title: "The Matrix", Type: "movie", Year: intPtr(1999), RatingKey: stringPtr("2")},
 			},
 			expected: 1,
 		},
 		{
 			name: "multiple duplicates",
 			items: []*components.Metadata{
-				{Title: "Movie A", Type: "movie", Year: int64Ptr(2020), RatingKey: stringPtr("1")},
-				{Title: "Movie A", Type: "movie", Year: int64Ptr(2020), RatingKey: stringPtr("2")},
-				{Title: "Movie B", Type: "movie", Year: int64Ptr(2021), RatingKey: stringPtr("3")},
-				{Title: "Movie B", Type: "movie", Year: int64Ptr(2021), RatingKey: stringPtr("4")},
-				{Title: "Movie B", Type: "movie", Year: int64Ptr(2021), RatingKey: stringPtr("5")},
+				{Title: "Movie A", Type: "movie", Year: intPtr(2020), RatingKey: stringPtr("1")},
+				{Title: "Movie A", Type: "movie", Year: intPtr(2020), RatingKey: stringPtr("2")},
+				{Title: "Movie B", Type: "movie", Year: intPtr(2021), RatingKey: stringPtr("3")},
+				{Title: "Movie B", Type: "movie", Year: intPtr(2021), RatingKey: stringPtr("4")},
+				{Title: "Movie B", Type: "movie", Year: intPtr(2021), RatingKey: stringPtr("5")},
 			},
 			expected: 2,
 		},
 		{
 			name: "filter by type movie",
 			items: []*components.Metadata{
-				{Title: "The Matrix", Type: "movie", Year: int64Ptr(1999), RatingKey: stringPtr("1")},
-				{Title: "The Matrix", Type: "movie", Year: int64Ptr(1999), RatingKey: stringPtr("2")},
+				{Title: "The Matrix", Type: "movie", Year: intPtr(1999), RatingKey: stringPtr("1")},
+				{Title: "The Matrix", Type: "movie", Year: intPtr(1999), RatingKey: stringPtr("2")},
 				{Title: "Pilot", Type: "episode", GrandparentTitle: stringPtr("Show"), RatingKey: stringPtr("3")},
 			},
 			expected: 1,
@@ -153,8 +153,8 @@ func TestDuplicatesCmd_findDuplicates_withTypeFilter(t *testing.T) {
 	}
 
 	items := []*components.Metadata{
-		{Title: "The Matrix", Type: "movie", Year: int64Ptr(1999), RatingKey: stringPtr("1")},
-		{Title: "The Matrix", Type: "movie", Year: int64Ptr(1999), RatingKey: stringPtr("2")},
+		{Title: "The Matrix", Type: "movie", Year: intPtr(1999), RatingKey: stringPtr("1")},
+		{Title: "The Matrix", Type: "movie", Year: intPtr(1999), RatingKey: stringPtr("2")},
 		{Title: "Pilot", Type: "episode", GrandparentTitle: stringPtr("Show"), RatingKey: stringPtr("3")},
 		{Title: "Pilot", Type: "episode", GrandparentTitle: stringPtr("Show"), RatingKey: stringPtr("4")},
 	}
@@ -320,7 +320,7 @@ func TestDuplicatesCmd_generateKey_withEditions(t *testing.T) {
 			item: &components.Metadata{
 				Title:                "Blade Runner",
 				Type:                 "movie",
-				Year:                 int64Ptr(1982),
+				Year:                 intPtr(1982),
 				AdditionalProperties: map[string]any{"editionTitle": "Director's Cut"},
 			},
 			expected: "movie:blade runner:1982:director's cut",
@@ -331,7 +331,7 @@ func TestDuplicatesCmd_generateKey_withEditions(t *testing.T) {
 			item: &components.Metadata{
 				Title:                "Blade Runner",
 				Type:                 "movie",
-				Year:                 int64Ptr(1982),
+				Year:                 intPtr(1982),
 				AdditionalProperties: map[string]any{"editionTitle": "Director's Cut"},
 			},
 			expected: "movie:blade runner:1982",
@@ -342,7 +342,7 @@ func TestDuplicatesCmd_generateKey_withEditions(t *testing.T) {
 			item: &components.Metadata{
 				Title: "The Matrix",
 				Type:  "movie",
-				Year:  int64Ptr(1999),
+				Year:  intPtr(1999),
 			},
 			expected: "movie:the matrix:1999",
 		},
@@ -352,7 +352,7 @@ func TestDuplicatesCmd_generateKey_withEditions(t *testing.T) {
 			item: &components.Metadata{
 				Title: "The Matrix",
 				Type:  "movie",
-				Year:  int64Ptr(1999),
+				Year:  intPtr(1999),
 			},
 			expected: "movie:the matrix:1999",
 		},
@@ -380,21 +380,21 @@ func TestDuplicatesCmd_findDuplicates_editionsNotDuplicatesByDefault(t *testing.
 		{
 			Title:                "Blade Runner",
 			Type:                 "movie",
-			Year:                 int64Ptr(1982),
+			Year:                 intPtr(1982),
 			RatingKey:            stringPtr("1"),
 			AdditionalProperties: map[string]any{"editionTitle": "Director's Cut"},
 		},
 		{
 			Title:                "Blade Runner",
 			Type:                 "movie",
-			Year:                 int64Ptr(1982),
+			Year:                 intPtr(1982),
 			RatingKey:            stringPtr("2"),
 			AdditionalProperties: map[string]any{"editionTitle": "Final Cut"},
 		},
 		{
 			Title:                "Blade Runner",
 			Type:                 "movie",
-			Year:                 int64Ptr(1982),
+			Year:                 intPtr(1982),
 			RatingKey:            stringPtr("3"),
 			AdditionalProperties: map[string]any{"editionTitle": "Theatrical Cut"},
 		},
@@ -418,14 +418,14 @@ func TestDuplicatesCmd_findDuplicates_editionsAreDuplicatesWhenFlagSet(t *testin
 		{
 			Title:                "Blade Runner",
 			Type:                 "movie",
-			Year:                 int64Ptr(1982),
+			Year:                 intPtr(1982),
 			RatingKey:            stringPtr("1"),
 			AdditionalProperties: map[string]any{"editionTitle": "Director's Cut"},
 		},
 		{
 			Title:                "Blade Runner",
 			Type:                 "movie",
-			Year:                 int64Ptr(1982),
+			Year:                 intPtr(1982),
 			RatingKey:            stringPtr("2"),
 			AdditionalProperties: map[string]any{"editionTitle": "Final Cut"},
 		},
@@ -518,7 +518,7 @@ func TestDuplicateGroup_withEdition(t *testing.T) {
 	}
 }
 
-func int64Ptr(i int64) *int64 {
+func intPtr(i int) *int {
 	return &i
 }
 

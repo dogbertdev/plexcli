@@ -184,6 +184,7 @@ func applyOutputFormat(cli *CLI, format string) {
 	cli.Watch.Stats.Output = format
 	cli.Cache.Clear.Output = format
 	cli.Auth.Servers.Output = format
+	cli.Auth.TokenInfo.Output = format
 }
 
 // loadConfig loads configuration from file and/or environment/cli flags

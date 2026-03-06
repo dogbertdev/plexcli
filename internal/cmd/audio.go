@@ -89,12 +89,12 @@ func (c *AudioCheckCmd) checkAudio(items []*components.Metadata, requestedCodecs
 func (c *AudioCheckCmd) extractAudioInfo(item *components.Metadata) []AudioInfo {
 	var infos []AudioInfo
 	title := audioGetTitle(item)
-	year := int64PtrToInt(item.Year)
+	year := intPtrToInt(item.Year)
 	itemType := anyToString(item.Type)
 
 	forEachStream(item, func(media *components.Media, stream *components.Stream) {
 		// StreamType 2 = audio
-		if stream.StreamType == nil || *stream.StreamType != 2 {
+		if stream.StreamType != components.StreamTypeAudio {
 			return
 		}
 

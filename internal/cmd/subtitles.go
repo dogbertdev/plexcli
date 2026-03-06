@@ -112,7 +112,7 @@ func (c *SubtitlesMissingCmd) extractSubtitleInfo(item *components.Metadata, req
 
 	forEachStream(item, func(_ *components.Media, stream *components.Stream) {
 		// StreamType 3 = subtitles
-		if stream.StreamType == nil || *stream.StreamType != 3 {
+		if stream.StreamType != components.StreamTypeSubtitle {
 			return
 		}
 

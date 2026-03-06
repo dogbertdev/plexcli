@@ -117,7 +117,7 @@ func (c *QualityCheckCmd) extractQualityInfo(item *components.Metadata) QualityI
 			part := media.Part[0]
 			if part.Stream != nil {
 				for _, stream := range part.Stream {
-					if stream.StreamType != nil && *stream.StreamType == 1 {
+					if stream.StreamType == components.StreamTypeVideo {
 						info.VideoCodec = anyToString(stream.Codec)
 					}
 				}

@@ -41,8 +41,8 @@ func TestSubtitlesMissingCmd_extractSubtitleInfo(t *testing.T) {
 				Media: []components.Media{
 					{Part: []components.Part{
 						{Stream: []components.Stream{
-							{StreamType: subtitleInt64Ptr(3), LanguageCode: "en"},
-							{StreamType: subtitleInt64Ptr(3), LanguageCode: "fr"},
+							{StreamType: components.StreamTypeSubtitle, LanguageCode: subtitleStrPtr("en"), Codec: "srt"},
+							{StreamType: components.StreamTypeSubtitle, LanguageCode: subtitleStrPtr("fr"), Codec: "srt"},
 						}},
 					}},
 				},
@@ -60,8 +60,8 @@ func TestSubtitlesMissingCmd_extractSubtitleInfo(t *testing.T) {
 				Media: []components.Media{
 					{Part: []components.Part{
 						{Stream: []components.Stream{
-							{StreamType: subtitleInt64Ptr(3), LanguageCode: "en"},
-							{StreamType: subtitleInt64Ptr(3), LanguageCode: "de"},
+							{StreamType: components.StreamTypeSubtitle, LanguageCode: subtitleStrPtr("en"), Codec: "srt"},
+							{StreamType: components.StreamTypeSubtitle, LanguageCode: subtitleStrPtr("de"), Codec: "srt"},
 						}},
 					}},
 				},
@@ -101,7 +101,7 @@ func TestSubtitlesMissingCmd_extractSubtitleInfo_withMissing(t *testing.T) {
 			Media: []components.Media{
 				{Part: []components.Part{
 					{Stream: []components.Stream{
-						{StreamType: subtitleInt64Ptr(3), LanguageCode: "en"},
+						{StreamType: components.StreamTypeSubtitle, LanguageCode: subtitleStrPtr("en"), Codec: "srt"},
 					}},
 				}},
 			},
@@ -141,7 +141,7 @@ func TestSubtitlesMissingCmd_extractSubtitleInfo_UsesLanguageFallback(t *testing
 				Part: []components.Part{
 					{
 						Stream: []components.Stream{
-							{StreamType: subtitleInt64Ptr(3), Language: "eng"},
+							{StreamType: components.StreamTypeSubtitle, Language: subtitleStrPtr("eng"), Codec: "srt"},
 						},
 					},
 				},
@@ -263,6 +263,6 @@ func TestGetTitle(t *testing.T) {
 	}
 }
 
-func subtitleInt64Ptr(i int64) *int64 {
-	return &i
+func subtitleStrPtr(s string) *string {
+	return &s
 }

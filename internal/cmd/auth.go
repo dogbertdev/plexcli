@@ -19,10 +19,13 @@ import (
 )
 
 type AuthCmd struct {
-	Login   AuthLoginCmd   `cmd:"" help:"Authenticate with Plex and store a token"`
-	Logout  AuthLogoutCmd  `cmd:"" help:"Clear stored Plex authentication credentials"`
-	Servers AuthServersCmd `cmd:"" help:"Discover Plex servers and optionally select one"`
+	Login     AuthLoginCmd     `cmd:"" help:"Authenticate with Plex and store a token"`
+	Logout    AuthLogoutCmd    `cmd:"" help:"Clear stored Plex authentication credentials"`
+	Servers   AuthServersCmd   `cmd:"" help:"Discover Plex servers and optionally select one"`
+	TokenInfo AuthTokenInfoCmd `cmd:"" name:"token-info" help:"Inspect token owner and accessible Plex resources for debugging"`
 }
+
+var inspectToken = auth.InspectToken
 
 type AuthLoginCmd struct {
 	Username string `help:"Plex username or email" short:"u" env:"PLEX_USERNAME" default:""`
@@ -165,6 +168,10 @@ type AuthServersCmd struct {
 	PreferLocal bool   `help:"Prefer local connection URIs when selecting a server" default:"true"`
 }
 
+type AuthTokenInfoCmd struct {
+	Output string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+}
+
 type AuthServerItem struct {
 	ServerIndex     int    `json:"server_index"`
 	ConnectionIndex int    `json:"connection_index"`
@@ -179,6 +186,24 @@ type AuthServerItem struct {
 	Local           bool   `json:"local"`
 	Relay           bool   `json:"relay"`
 	Preferred       bool   `json:"preferred"`
+}
+
+type AuthTokenResourceItem struct {
+	ResourceIndex   int    `json:"resource_index"`
+	ConnectionIndex int    `json:"connection_index"`
+	Name            string `json:"name"`
+	Product         string `json:"product"`
+	Provides        string `json:"provides"`
+	Owned           bool   `json:"owned"`
+	Home            bool   `json:"home"`
+	Online          bool   `json:"online"`
+	ResourceID      string `json:"resource_id"`
+	ConnectionCount int    `json:"connection_count"`
+	ConnectionURI   string `json:"connection_uri"`
+	Protocol        string `json:"protocol"`
+	Local           bool   `json:"local"`
+	Relay           bool   `json:"relay"`
+	IPv6            bool   `json:"ipv6"`
 }
 
 func (c *AuthServersCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
@@ -263,6 +288,25 @@ func (c *AuthServersCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) er
 	return c.output(u.Out(), items)
 }
 
+func (c *AuthTokenInfoCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
+	if cfg == nil {
+		return fmt.Errorf("configuration is required")
+	}
+	if cfg.Token == "" {
+		return fmt.Errorf("token is required to inspect token info; use --token, PLEX_TOKEN, or run 'plex auth login --browser' first")
+	}
+
+	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
+	defer cancel()
+
+	info, err := inspectToken(authCtx, cfg.Token)
+	if err != nil {
+		return fmt.Errorf("failed to inspect token info: %w", err)
+	}
+
+	return c.output(u.Out(), info)
+}
+
 func (c *AuthServersCmd) output(w io.Writer, items []AuthServerItem) error {
 	formatter := outfmt.NewFormatter(outfmt.Format(c.Output))
 
@@ -285,6 +329,118 @@ func (c *AuthServersCmd) output(w io.Writer, items []AuthServerItem) error {
 	}
 
 	return formatter.Format(w, header, rows, items)
+}
+
+func (c *AuthTokenInfoCmd) output(w io.Writer, info *auth.TokenInfo) error {
+	if info == nil {
+		return fmt.Errorf("token info is required")
+	}
+
+	items := flattenTokenResourceItems(info.Resources)
+	switch outfmt.Format(c.Output) {
+	case outfmt.JSON:
+		return outfmt.NewFormatter(outfmt.JSON).Format(w, nil, nil, info)
+	case outfmt.TSV:
+		return formatTokenResourceItems(w, outfmt.TSV, items)
+	default:
+		if err := writeTokenAccountSummary(w, info.Account, len(info.Resources)); err != nil {
+			return err
+		}
+		return formatTokenResourceItems(w, outfmt.Table, items)
+	}
+}
+
+func flattenTokenResourceItems(resources []auth.TokenResourceInfo) []AuthTokenResourceItem {
+	items := make([]AuthTokenResourceItem, 0, len(resources))
+	for i, resource := range resources {
+		if len(resource.Connections) == 0 {
+			items = append(items, AuthTokenResourceItem{
+				ResourceIndex:   i + 1,
+				ConnectionIndex: 1,
+				Name:            resource.Name,
+				Product:         resource.Product,
+				Provides:        resource.Provides,
+				Owned:           resource.Owned,
+				Home:            resource.Home,
+				Online:          resource.Presence,
+				ResourceID:      resource.ClientIdentifier,
+				ConnectionCount: 0,
+			})
+			continue
+		}
+
+		for j, conn := range resource.Connections {
+			items = append(items, AuthTokenResourceItem{
+				ResourceIndex:   i + 1,
+				ConnectionIndex: j + 1,
+				Name:            resource.Name,
+				Product:         resource.Product,
+				Provides:        resource.Provides,
+				Owned:           resource.Owned,
+				Home:            resource.Home,
+				Online:          resource.Presence,
+				ResourceID:      resource.ClientIdentifier,
+				ConnectionCount: len(resource.Connections),
+				ConnectionURI:   conn.URI,
+				Protocol:        conn.Protocol,
+				Local:           conn.Local,
+				Relay:           conn.Relay,
+				IPv6:            conn.IPv6,
+			})
+		}
+	}
+
+	return items
+}
+
+func formatTokenResourceItems(w io.Writer, format outfmt.Format, items []AuthTokenResourceItem) error {
+	formatter := outfmt.NewFormatter(format)
+	header := []string{"RESOURCE", "CONN", "NAME", "PRODUCT", "PROVIDES", "ONLINE", "OWNED", "HOME", "LOCAL", "RELAY", "IPV6", "PROTO", "CONNECTION_URI", "CONNS", "RESOURCE_ID"}
+	rows := make([][]string, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, []string{
+			strconv.Itoa(item.ResourceIndex),
+			strconv.Itoa(item.ConnectionIndex),
+			item.Name,
+			item.Product,
+			item.Provides,
+			strconv.FormatBool(item.Online),
+			strconv.FormatBool(item.Owned),
+			strconv.FormatBool(item.Home),
+			strconv.FormatBool(item.Local),
+			strconv.FormatBool(item.Relay),
+			strconv.FormatBool(item.IPv6),
+			item.Protocol,
+			item.ConnectionURI,
+			strconv.Itoa(item.ConnectionCount),
+			item.ResourceID,
+		})
+	}
+
+	return formatter.Format(w, header, rows, items)
+}
+
+func writeTokenAccountSummary(w io.Writer, account auth.TokenAccountInfo, resourceCount int) error {
+	_, err := fmt.Fprintf(
+		w,
+		"TITLE\t%s\nUSERNAME\t%s\nEMAIL\t%s\nFRIENDLY_NAME\t%s\nHOME\t%t\nHOME_ADMIN\t%t\nGUEST\t%t\nRESTRICTED\t%t\nCONFIRMED\t%t\nHAS_PASSWORD\t%t\nTWO_FACTOR\t%t\nPLEX_PASS\t%t\nSUBSCRIPTION_STATUS\t%s\nSUBSCRIPTION_PLAN\t%s\nRESOURCE_COUNT\t%d\n\n",
+		account.Title,
+		account.Username,
+		account.Email,
+		account.FriendlyName,
+		account.Home,
+		account.HomeAdmin,
+		account.Guest,
+		account.Restricted,
+		account.Confirmed,
+		account.HasPassword,
+		account.TwoFactorEnabled,
+		account.SubscriptionActive,
+		account.SubscriptionStatus,
+		account.SubscriptionPlan,
+		resourceCount,
+	)
+	return err
 }
 
 func applySelectedServer(cfg *config.Config, server auth.ServerResource, serverURL, fallbackToken string) {
