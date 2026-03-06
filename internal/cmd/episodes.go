@@ -97,7 +97,7 @@ func (c *EpisodesMissingCmd) findMissingEpisodes(episodes []*components.Metadata
 
 		season := 0
 		if ep.ParentIndex != nil {
-			season = int(*ep.ParentIndex)
+			season = *ep.ParentIndex
 		}
 
 		if c.Season > 0 && season != c.Season {
@@ -106,7 +106,7 @@ func (c *EpisodesMissingCmd) findMissingEpisodes(episodes []*components.Metadata
 
 		episodeNum := 0
 		if ep.Index != nil {
-			episodeNum = int(*ep.Index)
+			episodeNum = *ep.Index
 		}
 
 		if episodeNum > 0 {

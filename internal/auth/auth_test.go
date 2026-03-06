@@ -2,13 +2,67 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/LukeHagar/plexgo/models/components"
+
 	"github.com/dogbertdev/plexcli/internal/config"
 )
+
+type fakePlexTVService struct {
+	tokenDetails      *components.UserPlexAccount
+	tokenDetailsErr   error
+	serverResources   []components.PlexDevice
+	serverResourceErr error
+}
+
+func (f *fakePlexTVService) TokenDetails(ctx context.Context) (*components.UserPlexAccount, error) {
+	return f.tokenDetails, f.tokenDetailsErr
+}
+
+func (f *fakePlexTVService) ServerResources(ctx context.Context) ([]components.PlexDevice, error) {
+	return f.serverResources, f.serverResourceErr
+}
+
+func loadUserFixture(t *testing.T) *components.UserPlexAccount {
+	t.Helper()
+
+	path := filepath.Join("testdata", "plex_tv_user.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", path, err)
+	}
+
+	var account components.UserPlexAccount
+	if err := json.Unmarshal(raw, &account); err != nil {
+		t.Fatalf("failed to decode %s: %v", path, err)
+	}
+
+	return &account
+}
+
+func loadResourcesFixture(t *testing.T) []components.PlexDevice {
+	t.Helper()
+
+	path := filepath.Join("testdata", "plex_tv_resources.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", path, err)
+	}
+
+	var resources []components.PlexDevice
+	if err := json.Unmarshal(raw, &resources); err != nil {
+		t.Fatalf("failed to decode %s: %v", path, err)
+	}
+
+	return resources
+}
 
 func TestTokenAuth_Name(t *testing.T) {
 	auth := NewTokenAuth("test-token")
@@ -27,6 +81,12 @@ func TestTokenAuth_Authenticate_EmptyToken(t *testing.T) {
 }
 
 func TestTokenAuth_Authenticate_InvalidToken(t *testing.T) {
+	original := newPlexTVService
+	newPlexTVService = func(token string) plexTVService {
+		return &fakePlexTVService{tokenDetailsErr: errors.New("unauthorized")}
+	}
+	defer func() { newPlexTVService = original }()
+
 	auth := NewTokenAuth("invalid-token-that-will-fail")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -105,6 +165,12 @@ func TestAutoAuth_Authenticate_NoCredentials(t *testing.T) {
 }
 
 func TestAutoAuth_Authenticate_TokenFirst(t *testing.T) {
+	original := newPlexTVService
+	newPlexTVService = func(token string) plexTVService {
+		return &fakePlexTVService{tokenDetailsErr: errors.New("unauthorized")}
+	}
+	defer func() { newPlexTVService = original }()
+
 	cfg := config.Config{
 		Token:    "invalid-token-for-testing",
 		Username: "user",
@@ -206,5 +272,237 @@ func TestPreferredServerURI(t *testing.T) {
 	}
 	if got != "https://local.example:32400" {
 		t.Fatalf("unexpected preferred URI: %s", got)
+	}
+}
+
+func TestNormalizeTokenAccountInfo(t *testing.T) {
+	active := true
+	confirmed := true
+	home := true
+	homeAdmin := true
+	twoFactor := true
+	status := components.UserPlexAccountSubscriptionStatusActive
+	plan := "Lifetime Plex Pass"
+
+	info := normalizeTokenAccountInfo(&components.UserPlexAccount{
+		ID:               42,
+		Title:            "Paul",
+		Username:         "paul",
+		Email:            "paul@example.com",
+		FriendlyName:     "Paul Mansfield",
+		UUID:             "uuid-123",
+		Confirmed:        &confirmed,
+		Home:             &home,
+		HomeAdmin:        &homeAdmin,
+		HasPassword:      &active,
+		TwoFactorEnabled: &twoFactor,
+		Roles:            []string{"plexpass", "admin"},
+		Entitlements:     []string{"sync"},
+		Subscription: &components.Subscription{
+			Active: &active,
+			Status: &status,
+			Plan:   &plan,
+		},
+	})
+
+	if info.Title != "Paul" || info.Username != "paul" || info.Email != "paul@example.com" {
+		t.Fatalf("unexpected normalized account info: %+v", info)
+	}
+	if !info.Home || !info.HomeAdmin || !info.Confirmed || !info.SubscriptionActive || !info.TwoFactorEnabled {
+		t.Fatalf("expected account flags to be preserved: %+v", info)
+	}
+	if info.SubscriptionStatus != "Active" || info.SubscriptionPlan != "Lifetime Plex Pass" {
+		t.Fatalf("unexpected subscription info: %+v", info)
+	}
+}
+
+func TestNormalizeTokenAccountInfo_LiveFixture(t *testing.T) {
+	info := normalizeTokenAccountInfo(loadUserFixture(t))
+
+	if info.Title != "fixture-user" || info.Username != "fixture-user" || info.Email != "fixture@example.com" {
+		t.Fatalf("unexpected normalized account identity: %+v", info)
+	}
+	if info.FriendlyName != "Fixture User" || info.UUID != "fixture-uuid" {
+		t.Fatalf("unexpected normalized account profile: %+v", info)
+	}
+	if !info.HasPassword || info.Home || info.HomeAdmin || info.Guest || info.Restricted || info.Confirmed || info.Anonymous || info.TwoFactorEnabled {
+		t.Fatalf("unexpected normalized account flags: %+v", info)
+	}
+	if !info.SubscriptionActive || info.SubscriptionStatus != "Active" || info.SubscriptionPlan != "monthly" {
+		t.Fatalf("unexpected normalized subscription info: %+v", info)
+	}
+	if len(info.Roles) != 1 || info.Roles[0] != "member" || len(info.Entitlements) != 1 || info.Entitlements[0] != "sync" {
+		t.Fatalf("unexpected normalized roles or entitlements: %+v", info)
+	}
+}
+
+func TestNormalizeTokenResourceInfo(t *testing.T) {
+	platform := "linux"
+	device := "server"
+	platformVersion := "6.8"
+	sourceTitle := "Shared Server"
+
+	info := normalizeTokenResourceInfo(components.PlexDevice{
+		Name:             "MediaBox",
+		Product:          "Plex Media Server",
+		ProductVersion:   "1.0.0",
+		Platform:         &platform,
+		PlatformVersion:  &platformVersion,
+		Device:           &device,
+		ClientIdentifier: "server-123",
+		Provides:         "server",
+		PublicAddress:    "203.0.113.5",
+		AccessToken:      "server-token",
+		Owned:            true,
+		Home:             true,
+		Presence:         true,
+		SourceTitle:      &sourceTitle,
+		Connections: []components.Connections{
+			{
+				Protocol: components.PlexDeviceProtocolHTTPS,
+				Address:  "10.0.0.5",
+				Port:     32400,
+				URI:      "https://10.0.0.5:32400",
+				Local:    true,
+				Relay:    false,
+				IPv6:     false,
+			},
+		},
+	})
+
+	if info.Name != "MediaBox" || info.Product != "Plex Media Server" || info.ConnectionCount != 1 {
+		t.Fatalf("unexpected normalized resource info: %+v", info)
+	}
+	if len(info.Connections) != 1 || info.Connections[0].URI != "https://10.0.0.5:32400" {
+		t.Fatalf("unexpected normalized connections: %+v", info.Connections)
+	}
+}
+
+func TestNormalizeTokenResourceInfos_LiveFixture(t *testing.T) {
+	items := normalizeTokenResourceInfos(loadResourcesFixture(t))
+	if len(items) != 1 {
+		t.Fatalf("expected 1 normalized resource, got %d", len(items))
+	}
+
+	item := items[0]
+	if item.Name != "fixture-server" || item.Product != "Plex Media Server" || item.Provides != "server" {
+		t.Fatalf("unexpected normalized resource identity: %+v", item)
+	}
+	if item.Platform != "Linux" || item.Device != "ASRock Z390 Steel Legend" {
+		t.Fatalf("unexpected normalized resource host details: %+v", item)
+	}
+	if item.ClientIdentifier != "fixture-server-id" || item.PublicAddress != "203.0.113.10" {
+		t.Fatalf("unexpected normalized resource addressing: %+v", item)
+	}
+	if !item.Owned || !item.Presence || item.Home || item.Relay || item.ConnectionCount != 1 {
+		t.Fatalf("unexpected normalized resource flags: %+v", item)
+	}
+	if len(item.Connections) != 1 {
+		t.Fatalf("expected 1 connection, got %d", len(item.Connections))
+	}
+
+	conn := item.Connections[0]
+	if conn.Protocol != "https" || conn.Address != "192.0.2.10" || conn.Port != 32400 || conn.URI != "https://fixture-server.plex.direct:32400" {
+		t.Fatalf("unexpected normalized connection details: %+v", conn)
+	}
+	if !conn.Local || conn.Relay || conn.IPv6 {
+		t.Fatalf("unexpected normalized connection flags: %+v", conn)
+	}
+}
+
+func TestInspectToken(t *testing.T) {
+	original := newPlexTVService
+	newPlexTVService = func(token string) plexTVService {
+		confirmed := true
+		return &fakePlexTVService{
+			tokenDetails: &components.UserPlexAccount{
+				Title:     "Paul",
+				Username:  "paul",
+				Email:     "paul@example.com",
+				Confirmed: &confirmed,
+			},
+			serverResources: []components.PlexDevice{
+				{
+					Name:             "MediaBox",
+					Product:          "Plex Media Server",
+					ClientIdentifier: "server-123",
+					Provides:         "server",
+				},
+			},
+		}
+	}
+	defer func() { newPlexTVService = original }()
+
+	info, err := InspectToken(context.Background(), "token-123")
+	if err != nil {
+		t.Fatalf("InspectToken returned error: %v", err)
+	}
+	if info.Account.Title != "Paul" {
+		t.Fatalf("expected account title to be preserved, got %+v", info.Account)
+	}
+	if len(info.Resources) != 1 || info.Resources[0].ClientIdentifier != "server-123" {
+		t.Fatalf("unexpected resources: %+v", info.Resources)
+	}
+}
+
+func TestDiscoverServers_UsesSDKResources(t *testing.T) {
+	original := newPlexTVService
+	newPlexTVService = func(token string) plexTVService {
+		return &fakePlexTVService{
+			serverResources: []components.PlexDevice{
+				{
+					Name:             "MediaBox",
+					Product:          "Plex Media Server",
+					ClientIdentifier: "server-123",
+					Owned:            true,
+					Presence:         true,
+					AccessToken:      "server-token",
+					Connections: []components.Connections{
+						{
+							Protocol: components.PlexDeviceProtocolHTTPS,
+							URI:      "https://10.0.0.5:32400",
+							Local:    true,
+						},
+					},
+				},
+				{
+					Name:    "Mobile Client",
+					Product: "Plex for iOS",
+				},
+			},
+		}
+	}
+	defer func() { newPlexTVService = original }()
+
+	servers, err := DiscoverServers(context.Background(), "token-123")
+	if err != nil {
+		t.Fatalf("DiscoverServers returned error: %v", err)
+	}
+	if len(servers) != 1 {
+		t.Fatalf("expected one Plex Media Server, got %d", len(servers))
+	}
+	if servers[0].Name != "MediaBox" || len(servers[0].Connections) != 1 {
+		t.Fatalf("unexpected normalized server: %+v", servers[0])
+	}
+}
+
+func TestNormalizeServerResources_LiveFixture(t *testing.T) {
+	servers := normalizeServerResources(loadResourcesFixture(t))
+	if len(servers) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(servers))
+	}
+
+	server := servers[0]
+	if server.Name != "fixture-server" || server.Product != "Plex Media Server" || server.ClientIdentifier != "fixture-server-id" {
+		t.Fatalf("unexpected normalized server identity: %+v", server)
+	}
+	if !server.Owned || !server.Presence {
+		t.Fatalf("unexpected normalized server flags: %+v", server)
+	}
+	if len(server.Connections) != 1 {
+		t.Fatalf("expected 1 server connection, got %d", len(server.Connections))
+	}
+	if server.Connections[0].URI != "https://fixture-server.plex.direct:32400" || server.Connections[0].Protocol != "https" || !server.Connections[0].Local {
+		t.Fatalf("unexpected normalized server connection: %+v", server.Connections[0])
 	}
 }

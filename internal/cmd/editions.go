@@ -172,7 +172,7 @@ func (c *EditionsCmd) extractEditions(items []editionItemWithSection) []EditionI
 				}
 
 				if item.Year != nil {
-					info.Year = int(*item.Year)
+					info.Year = *item.Year
 				}
 
 				// Check for mismatch

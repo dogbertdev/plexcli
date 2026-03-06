@@ -1,0 +1,34 @@
+[
+  {
+    "name": "fixture-server",
+    "product": "Plex Media Server",
+    "productVersion": "1.41.8.9834-071366d65",
+    "platform": "Linux",
+    "platformVersion": "6.18.4-1-MANJARO (#1 SMP PREEMPT_DYNAMIC Thu, 08 Jan 2026 12:46:08 +0000)",
+    "device": "ASRock Z390 Steel Legend",
+    "clientIdentifier": "fixture-server-id",
+    "provides": "server",
+    "publicAddress": "203.0.113.10",
+    "owned": true,
+    "home": false,
+    "synced": false,
+    "relay": false,
+    "presence": true,
+    "httpsRequired": false,
+    "publicAddressMatches": false,
+    "DNSRebindingProtection": null,
+    "NatLoopbackSupported": null,
+    "sourceTitle": null,
+    "connections": [
+      {
+        "protocol": "https",
+        "address": "192.0.2.10",
+        "port": 32400,
+        "uri": "https://fixture-server.plex.direct:32400",
+        "local": true,
+        "relay": false,
+        "IPv6": false
+      }
+    ]
+  }
+]

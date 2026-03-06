@@ -101,7 +101,7 @@ func (c *DuplicatesCmd) findDuplicates(items []*components.Metadata) []Duplicate
 
 			// Add year for movies
 			if year := item.GetYear(); year != nil {
-				group.Year = int(*year)
+				group.Year = *year
 			}
 
 			// Add show for episodes
@@ -154,7 +154,7 @@ func (c *DuplicatesCmd) generateKey(item *components.Metadata) string {
 		// Group by title + year
 		year := 0
 		if y := item.GetYear(); y != nil {
-			year = int(*y)
+			year = *y
 		}
 
 		// When EditionsAreDuplicates is false (default), include edition in key

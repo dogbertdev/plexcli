@@ -85,27 +85,8 @@ func (t *TokenAuth) Authenticate(ctx context.Context) (string, error) {
 		return "", ErrNoCredentials
 	}
 
-	client := &http.Client{Timeout: DefaultTimeout}
-	req, err := http.NewRequestWithContext(ctx, "GET", PlexTVURL+"/user", nil)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrInvalidToken, err)
-	}
-
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("X-Plex-Token", t.token)
-	req.Header.Set("X-Plex-Client-Identifier", DefaultClientID)
-	req.Header.Set("X-Plex-Product", DefaultProduct)
-	req.Header.Set("X-Plex-Version", DefaultVersion)
-	req.Header.Set("X-Plex-Platform", DefaultPlatform)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrInvalidToken, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != StatusOK {
-		return "", fmt.Errorf("%w: received status %d", ErrInvalidToken, resp.StatusCode)
+	if _, err := getTokenDetails(ctx, t.token); err != nil {
+		return "", err
 	}
 
 	return t.token, nil
@@ -358,44 +339,12 @@ func PollPINToken(ctx context.Context, pinID int64, clientID string, pollInterva
 }
 
 func DiscoverServers(ctx context.Context, token string) ([]ServerResource, error) {
-	if token == "" {
-		return nil, ErrNoCredentials
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", PlexTVURL+"/resources?includeHttps=1", nil)
+	resources, err := getServerResources(ctx, token)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to create discover request: %v", ErrAuthFailed, err)
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("X-Plex-Token", token)
-	req.Header.Set("X-Plex-Client-Identifier", DefaultClientID)
-	req.Header.Set("X-Plex-Product", DefaultProduct)
-	req.Header.Set("X-Plex-Version", DefaultVersion)
-	req.Header.Set("X-Plex-Platform", DefaultPlatform)
-
-	resp, err := (&http.Client{Timeout: DefaultTimeout}).Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to discover servers: %v", ErrAuthFailed, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != StatusOK {
-		return nil, fmt.Errorf("%w: failed to discover servers (status %d)", ErrAuthFailed, resp.StatusCode)
+		return nil, err
 	}
 
-	var resources []ServerResource
-	if err := json.NewDecoder(resp.Body).Decode(&resources); err != nil {
-		return nil, fmt.Errorf("%w: failed to decode server resources: %v", ErrAuthFailed, err)
-	}
-
-	servers := make([]ServerResource, 0, len(resources))
-	for _, resource := range resources {
-		if strings.Contains(resource.Product, "Plex Media Server") {
-			servers = append(servers, resource)
-		}
-	}
-
-	return servers, nil
+	return normalizeServerResources(resources), nil
 }
 
 func PreferredServerURI(server ServerResource, preferLocal bool) (string, bool) {

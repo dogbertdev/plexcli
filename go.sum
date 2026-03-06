@@ -1,5 +1,7 @@
 github.com/LukeHagar/plexgo v0.27.0 h1:Up/CObHhzoxwtVDZfpkJNcoLw98ZQ/mzHW/1f5JTVPs=
 github.com/LukeHagar/plexgo v0.27.0/go.mod h1:kxd/ulciB3OeABsxL2CYV0MsCEMi9etm8gX2c/thgn0=
+github.com/LukeHagar/plexgo v0.28.2 h1:eKugagPqzOuysMx/wpZxxBCd622aq0Xn+oInP1qZZWs=
+github.com/LukeHagar/plexgo v0.28.2/go.mod h1:kxd/ulciB3OeABsxL2CYV0MsCEMi9etm8gX2c/thgn0=
 github.com/alecthomas/assert/v2 v2.11.0 h1:2Q9r3ki8+JYXvGsDyBXwH3LcJ+WK5D0gc5E8vS6K3D0=
 github.com/alecthomas/assert/v2 v2.11.0/go.mod h1:Bze95FyfUr7x34QZrjL+XP+0qgp/zg8yS+TtBj1WA3k=
 github.com/alecthomas/kong v1.13.0 h1:5e/7XC3ugvhP1DQBmTS+WuHtCbcv44hsohMgcvVxSrA=

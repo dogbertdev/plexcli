@@ -7,17 +7,14 @@ import (
 )
 
 func TestForEachStream_VisitsAllStreams(t *testing.T) {
-	streamTypeAudio := int64(2)
-	streamTypeSubtitle := int64(3)
-
 	item := &components.Metadata{
 		Media: []components.Media{
 			{
 				Part: []components.Part{
 					{
 						Stream: []components.Stream{
-							{StreamType: &streamTypeAudio, Codec: "aac"},
-							{StreamType: &streamTypeSubtitle, LanguageCode: "eng"},
+							{StreamType: components.StreamTypeAudio, Codec: "aac"},
+							{StreamType: components.StreamTypeSubtitle, LanguageCode: strPtr("eng"), Codec: "srt"},
 						},
 					},
 				},
@@ -26,7 +23,7 @@ func TestForEachStream_VisitsAllStreams(t *testing.T) {
 				Part: []components.Part{
 					{
 						Stream: []components.Stream{
-							{StreamType: &streamTypeAudio, Codec: "ac3"},
+							{StreamType: components.StreamTypeAudio, Codec: "ac3"},
 						},
 					},
 				},
@@ -39,10 +36,10 @@ func TestForEachStream_VisitsAllStreams(t *testing.T) {
 	subtitleSeen := 0
 	forEachStream(item, func(_ *components.Media, stream *components.Stream) {
 		visited++
-		if stream.StreamType != nil && *stream.StreamType == 2 {
+		if stream.StreamType == components.StreamTypeAudio {
 			audioSeen++
 		}
-		if stream.StreamType != nil && *stream.StreamType == 3 {
+		if stream.StreamType == components.StreamTypeSubtitle {
 			subtitleSeen++
 		}
 	})

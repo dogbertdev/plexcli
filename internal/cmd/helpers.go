@@ -18,16 +18,19 @@ func anyToString(v any) string {
 	}
 	// Handle other pointer types via reflection
 	rv := reflect.ValueOf(v)
-	if rv.Kind() == reflect.Ptr && !rv.IsNil() {
+	if rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return ""
+		}
 		return fmt.Sprintf("%v", rv.Elem().Interface())
 	}
 	return fmt.Sprintf("%v", v)
 }
 
-// int64PtrToInt safely converts *int64 to int
-func int64PtrToInt(v *int64) int {
+// intPtrToInt safely converts *int to int
+func intPtrToInt(v *int) int {
 	if v == nil {
 		return 0
 	}
-	return int(*v)
+	return *v
 }

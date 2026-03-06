@@ -8,7 +8,7 @@ import (
 	"github.com/LukeHagar/plexgo/models/components"
 )
 
-func int64PtrUnwatched(i int64) *int64 {
+func intPtrUnwatched(i int) *int {
 	return &i
 }
 
@@ -23,17 +23,17 @@ func TestUnwatchedCmd_filterUnwatched(t *testing.T) {
 		{
 			name: "all unwatched items",
 			items: []*components.Metadata{
-				{Title: "Movie 1", Type: "movie", ViewCount: nil, AddedAt: int64PtrUnwatched(now.Unix())},
-				{Title: "Movie 2", Type: "movie", ViewCount: int64PtrUnwatched(0), AddedAt: int64PtrUnwatched(now.Unix())},
+				{Title: "Movie 1", Type: "movie", ViewCount: nil, AddedAt: now.Unix()},
+				{Title: "Movie 2", Type: "movie", ViewCount: intPtrUnwatched(0), AddedAt: now.Unix()},
 			},
 			expected: 2,
 		},
 		{
 			name: "mixed watched and unwatched",
 			items: []*components.Metadata{
-				{Title: "Watched Movie", Type: "movie", ViewCount: int64PtrUnwatched(1), AddedAt: int64PtrUnwatched(now.Unix())},
-				{Title: "Unwatched Movie", Type: "movie", ViewCount: nil, AddedAt: int64PtrUnwatched(now.Unix())},
-				{Title: "Partially Watched", Type: "movie", ViewCount: int64PtrUnwatched(2), AddedAt: int64PtrUnwatched(now.Unix())},
+				{Title: "Watched Movie", Type: "movie", ViewCount: intPtrUnwatched(1), AddedAt: now.Unix()},
+				{Title: "Unwatched Movie", Type: "movie", ViewCount: nil, AddedAt: now.Unix()},
+				{Title: "Partially Watched", Type: "movie", ViewCount: intPtrUnwatched(2), AddedAt: now.Unix()},
 			},
 			expected: 1,
 		},
@@ -46,7 +46,7 @@ func TestUnwatchedCmd_filterUnwatched(t *testing.T) {
 			name: "nil items are skipped",
 			items: []*components.Metadata{
 				nil,
-				{Title: "Valid", Type: "movie", ViewCount: nil, AddedAt: int64PtrUnwatched(now.Unix())},
+				{Title: "Valid", Type: "movie", ViewCount: nil, AddedAt: now.Unix()},
 				nil,
 			},
 			expected: 1,
@@ -68,10 +68,10 @@ func TestUnwatchedCmd_filterByType(t *testing.T) {
 	now := time.Now()
 
 	items := []*components.Metadata{
-		{Title: "Movie 1", Type: "movie", ViewCount: nil, AddedAt: int64PtrUnwatched(now.Unix())},
-		{Title: "TV Show", Type: "show", ViewCount: nil, AddedAt: int64PtrUnwatched(now.Unix())},
-		{Title: "Season 1", Type: "season", ViewCount: nil, AddedAt: int64PtrUnwatched(now.Unix())},
-		{Title: "Episode 1", Type: "episode", ViewCount: nil, AddedAt: int64PtrUnwatched(now.Unix())},
+		{Title: "Movie 1", Type: "movie", ViewCount: nil, AddedAt: now.Unix()},
+		{Title: "TV Show", Type: "show", ViewCount: nil, AddedAt: now.Unix()},
+		{Title: "Season 1", Type: "season", ViewCount: nil, AddedAt: now.Unix()},
+		{Title: "Episode 1", Type: "episode", ViewCount: nil, AddedAt: now.Unix()},
 	}
 
 	tests := []struct {
@@ -119,9 +119,9 @@ func TestUnwatchedCmd_sortByAddedDate(t *testing.T) {
 	now := time.Now()
 
 	items := []*components.Metadata{
-		{Title: "Old Movie", Type: "movie", ViewCount: nil, AddedAt: int64PtrUnwatched(now.AddDate(0, 0, -7).Unix())},
-		{Title: "New Movie", Type: "movie", ViewCount: nil, AddedAt: int64PtrUnwatched(now.Unix())},
-		{Title: "Medium Movie", Type: "movie", ViewCount: nil, AddedAt: int64PtrUnwatched(now.AddDate(0, 0, -3).Unix())},
+		{Title: "Old Movie", Type: "movie", ViewCount: nil, AddedAt: now.AddDate(0, 0, -7).Unix()},
+		{Title: "New Movie", Type: "movie", ViewCount: nil, AddedAt: now.Unix()},
+		{Title: "Medium Movie", Type: "movie", ViewCount: nil, AddedAt: now.AddDate(0, 0, -3).Unix()},
 	}
 
 	cmd := &UnwatchedCmd{}
@@ -149,14 +149,14 @@ func TestUnwatchedCmd_toOutputItems(t *testing.T) {
 		{
 			Title:   "Test Movie",
 			Type:    "movie",
-			Year:    int64PtrUnwatched(2023),
-			AddedAt: int64PtrUnwatched(now.Unix()),
+			Year:    intPtrUnwatched(2023),
+			AddedAt: now.Unix(),
 		},
 		{
 			Title:   "No Year Movie",
 			Type:    "movie",
 			Year:    nil,
-			AddedAt: nil,
+			AddedAt: 0,
 		},
 	}
 

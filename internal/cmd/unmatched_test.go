@@ -7,8 +7,12 @@ import (
 	"github.com/LukeHagar/plexgo/models/components"
 )
 
-func int64PtrUnmatched(i int64) *int64 {
+func intPtrUnmatched(i int) *int {
 	return &i
+}
+
+func unmatchedStrPtr(s string) *string {
+	return &s
 }
 
 func TestUnmatchedCmd_findUnmatched(t *testing.T) {
@@ -16,6 +20,7 @@ func TestUnmatchedCmd_findUnmatched(t *testing.T) {
 		{
 			Title: "Matched (plex guid)",
 			Type:  "movie",
+			GUID:  unmatchedStrPtr("plex://movie/abc123"),
 			AdditionalProperties: map[string]any{
 				"guid": "plex://movie/abc123",
 			},
@@ -23,15 +28,16 @@ func TestUnmatchedCmd_findUnmatched(t *testing.T) {
 		{
 			Title: "Unmatched (local guid)",
 			Type:  "movie",
+			GUID:  unmatchedStrPtr("local://987"),
 			AdditionalProperties: map[string]any{
 				"guid": "local://987",
 			},
-			RatingKey: "22",
+			RatingKey: unmatchedStrPtr("22"),
 		},
 		{
 			Title:     "Unmatched (no guid)",
 			Type:      "show",
-			RatingKey: "33",
+			RatingKey: unmatchedStrPtr("33"),
 		},
 		nil,
 	}
@@ -55,6 +61,7 @@ func TestUnmatchedCmd_findUnmatchedTypeFilter(t *testing.T) {
 		{
 			Title: "Movie Unmatched",
 			Type:  "movie",
+			GUID:  unmatchedStrPtr("local://movie-1"),
 			AdditionalProperties: map[string]any{
 				"guid": "local://movie-1",
 			},
@@ -62,6 +69,7 @@ func TestUnmatchedCmd_findUnmatchedTypeFilter(t *testing.T) {
 		{
 			Title: "Show Unmatched",
 			Type:  "show",
+			GUID:  unmatchedStrPtr("local://show-1"),
 			AdditionalProperties: map[string]any{
 				"guid": "local://show-1",
 			},
@@ -83,6 +91,7 @@ func TestUnmatchedCmd_findUnmatchedEpisodeFilterMapsToShow(t *testing.T) {
 		{
 			Title: "Show Unmatched",
 			Type:  "show",
+			GUID:  unmatchedStrPtr("local://show-1"),
 			AdditionalProperties: map[string]any{
 				"guid": "local://show-1",
 			},
@@ -90,6 +99,7 @@ func TestUnmatchedCmd_findUnmatchedEpisodeFilterMapsToShow(t *testing.T) {
 		{
 			Title: "Movie Unmatched",
 			Type:  "movie",
+			GUID:  unmatchedStrPtr("local://movie-1"),
 			AdditionalProperties: map[string]any{
 				"guid": "local://movie-1",
 			},
@@ -114,38 +124,47 @@ func TestIsMetadataUnmatched(t *testing.T) {
 	}{
 		{
 			name: "guid local is unmatched",
-			item: &components.Metadata{AdditionalProperties: map[string]any{"guid": "local://123"}},
+			item: &components.Metadata{GUID: unmatchedStrPtr("local://123"), AdditionalProperties: map[string]any{"guid": "local://123"}},
 			want: true,
 		},
 		{
 			name: "guid plex is matched",
-			item: &components.Metadata{AdditionalProperties: map[string]any{"guid": "plex://movie/123"}},
+			item: &components.Metadata{GUID: unmatchedStrPtr("plex://movie/123"), AdditionalProperties: map[string]any{"guid": "plex://movie/123"}},
 			want: false,
 		},
 		{
-			name: "guid missing and tags missing is unmatched",
+			name: "no guid is unmatched",
 			item: &components.Metadata{},
 			want: true,
 		},
 		{
-			name: "guid missing and tag local is unmatched",
-			item: &components.Metadata{GUID: []components.Tag{{Tag: "local://abc"}}},
+			name: "all guids local is unmatched",
+			item: &components.Metadata{Guids: []components.Guids{{ID: "local://1"}, {ID: "local://2"}}},
 			want: true,
 		},
 		{
-			name: "guid missing and non-local tag is matched",
-			item: &components.Metadata{GUID: []components.Tag{{Tag: "imdb://tt123"}}},
+			name: "non-local guid in guid list is matched",
+			item: &components.Metadata{Guids: []components.Guids{{ID: "local://1"}, {ID: "tmdb://2"}}},
 			want: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isMetadataUnmatched(tt.item)
-			if got != tt.want {
-				t.Fatalf("isMetadataUnmatched()=%v want %v", got, tt.want)
+			if got := isMetadataUnmatched(tt.item); got != tt.want {
+				t.Fatalf("isMetadataUnmatched() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestMetadataGUID(t *testing.T) {
+	if got := metadataGUID(&components.Metadata{GUID: unmatchedStrPtr("plex://movie/42")}); got != "plex://movie/42" {
+		t.Fatalf("expected direct GUID, got %q", got)
+	}
+
+	if got := metadataGUID(&components.Metadata{AdditionalProperties: map[string]any{"guid": "local://99"}}); got != "local://99" {
+		t.Fatalf("expected additionalProperties guid, got %q", got)
 	}
 }
 
@@ -175,10 +194,11 @@ func TestUnmatchedCmd_findUnmatchedIncludesYear(t *testing.T) {
 		{
 			Title: "Movie Year",
 			Type:  "movie",
-			Year:  int64PtrUnmatched(2021),
+			Year:  intPtrUnmatched(2021),
 			AdditionalProperties: map[string]any{
 				"guid": "local://movie-year",
 			},
+			RatingKey: unmatchedStrPtr("44"),
 		},
 	}
 

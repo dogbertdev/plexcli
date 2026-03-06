@@ -21,13 +21,13 @@ func TestRecentlyAddedCmd_processItems_SortsByMostRecentAndLimits(t *testing.T) 
 
 	items := []itemWithSection{
 		{
-			item: &components.Metadata{Title: "Oldest", Type: "movie", AddedAt: &oldest},
+			item: &components.Metadata{Title: "Oldest", Type: "movie", AddedAt: oldest},
 		},
 		{
-			item: &components.Metadata{Title: "Newest", Type: "movie", AddedAt: &newest},
+			item: &components.Metadata{Title: "Newest", Type: "movie", AddedAt: newest},
 		},
 		{
-			item: &components.Metadata{Title: "Middle", Type: "movie", AddedAt: &middle},
+			item: &components.Metadata{Title: "Middle", Type: "movie", AddedAt: middle},
 		},
 	}
 

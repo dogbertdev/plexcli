@@ -94,8 +94,8 @@ func (c *RecentlyAddedCmd) processItems(items []itemWithSection) []RecentlyAdded
 		}
 
 		addedAt := time.Time{}
-		if item.AddedAt != nil && *item.AddedAt > 0 {
-			addedAt = time.Unix(*item.AddedAt, 0)
+		if item.AddedAt > 0 {
+			addedAt = time.Unix(item.AddedAt, 0)
 		}
 
 		if addedAt.Before(cutoffTime) {
@@ -110,7 +110,7 @@ func (c *RecentlyAddedCmd) processItems(items []itemWithSection) []RecentlyAdded
 		}
 
 		if item.Year != nil {
-			result.Year = int(*item.Year)
+			result.Year = *item.Year
 		}
 
 		results = append(results, result)

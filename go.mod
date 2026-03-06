@@ -3,7 +3,7 @@ module github.com/dogbertdev/plexcli
 go 1.22
 
 require (
-	github.com/LukeHagar/plexgo v0.27.0
+	github.com/LukeHagar/plexgo v0.28.2
 	github.com/alecthomas/kong v1.13.0
 	github.com/muesli/termenv v0.16.0
 	github.com/olekukonko/tablewriter v1.1.3

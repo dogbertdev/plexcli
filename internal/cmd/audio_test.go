@@ -7,10 +7,8 @@ import (
 )
 
 func TestAudioCheckCmd_extractAudioInfo(t *testing.T) {
-	audioType := int64(2)
-	subtitleType := int64(3)
-	channels := int64(6)
-	year := int64(2024)
+	channels := 6
+	year := 2024
 
 	item := &components.Metadata{
 		Title: "Sample Movie",
@@ -22,8 +20,8 @@ func TestAudioCheckCmd_extractAudioInfo(t *testing.T) {
 				Part: []components.Part{
 					{
 						Stream: []components.Stream{
-							{StreamType: &audioType, Codec: "dts"},
-							{StreamType: &subtitleType, LanguageCode: "eng"},
+							{StreamType: components.StreamTypeAudio, Codec: "dts"},
+							{StreamType: components.StreamTypeSubtitle, LanguageCode: audioStrPtr("eng"), Codec: "srt"},
 						},
 					},
 				},
@@ -53,9 +51,8 @@ func TestAudioCheckCmd_extractAudioInfo(t *testing.T) {
 }
 
 func TestAudioCheckCmd_checkAudio_FilterByType(t *testing.T) {
-	audioType := int64(2)
-	channels := int64(2)
-	year := int64(2024)
+	channels := 2
+	year := 2024
 
 	items := []*components.Metadata{
 		{
@@ -65,7 +62,7 @@ func TestAudioCheckCmd_checkAudio_FilterByType(t *testing.T) {
 			Media: []components.Media{
 				{
 					AudioChannels: &channels,
-					Part:          []components.Part{{Stream: []components.Stream{{StreamType: &audioType, Codec: "aac"}}}},
+					Part:          []components.Part{{Stream: []components.Stream{{StreamType: components.StreamTypeAudio, Codec: "aac"}}}},
 				},
 			},
 		},
@@ -76,7 +73,7 @@ func TestAudioCheckCmd_checkAudio_FilterByType(t *testing.T) {
 			Media: []components.Media{
 				{
 					AudioChannels: &channels,
-					Part:          []components.Part{{Stream: []components.Stream{{StreamType: &audioType, Codec: "aac"}}}},
+					Part:          []components.Part{{Stream: []components.Stream{{StreamType: components.StreamTypeAudio, Codec: "aac"}}}},
 				},
 			},
 		},
@@ -90,4 +87,8 @@ func TestAudioCheckCmd_checkAudio_FilterByType(t *testing.T) {
 	if results[0].Type != "movie" {
 		t.Fatalf("expected result type movie, got %q", results[0].Type)
 	}
+}
+
+func audioStrPtr(s string) *string {
+	return &s
 }

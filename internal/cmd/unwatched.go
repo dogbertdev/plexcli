@@ -101,15 +101,7 @@ func (c *UnwatchedCmd) sortByAddedDate(items []*components.Metadata) []*componen
 	copy(sorted, items)
 
 	sort.Slice(sorted, func(i, j int) bool {
-		addedI := int64(0)
-		addedJ := int64(0)
-		if sorted[i].AddedAt != nil {
-			addedI = *sorted[i].AddedAt
-		}
-		if sorted[j].AddedAt != nil {
-			addedJ = *sorted[j].AddedAt
-		}
-		return addedI > addedJ
+		return sorted[i].AddedAt > sorted[j].AddedAt
 	})
 
 	return sorted
@@ -128,11 +120,11 @@ func (c *UnwatchedCmd) toOutputItems(items []*components.Metadata) []UnwatchedIt
 		}
 
 		if item.Year != nil {
-			ui.Year = int(*item.Year)
+			ui.Year = *item.Year
 		}
 
-		if item.AddedAt != nil && *item.AddedAt > 0 {
-			t := time.Unix(*item.AddedAt, 0)
+		if item.AddedAt > 0 {
+			t := time.Unix(item.AddedAt, 0)
 			ui.AddedAt = t.Format("2006-01-02")
 		}
 
