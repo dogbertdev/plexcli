@@ -2,7 +2,10 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +28,40 @@ func (f *fakePlexTVService) TokenDetails(ctx context.Context) (*components.UserP
 
 func (f *fakePlexTVService) ServerResources(ctx context.Context) ([]components.PlexDevice, error) {
 	return f.serverResources, f.serverResourceErr
+}
+
+func loadUserFixture(t *testing.T) *components.UserPlexAccount {
+	t.Helper()
+
+	path := filepath.Join("testdata", "plex_tv_user.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", path, err)
+	}
+
+	var account components.UserPlexAccount
+	if err := json.Unmarshal(raw, &account); err != nil {
+		t.Fatalf("failed to decode %s: %v", path, err)
+	}
+
+	return &account
+}
+
+func loadResourcesFixture(t *testing.T) []components.PlexDevice {
+	t.Helper()
+
+	path := filepath.Join("testdata", "plex_tv_resources.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", path, err)
+	}
+
+	var resources []components.PlexDevice
+	if err := json.Unmarshal(raw, &resources); err != nil {
+		t.Fatalf("failed to decode %s: %v", path, err)
+	}
+
+	return resources
 }
 
 func TestTokenAuth_Name(t *testing.T) {
@@ -279,6 +316,26 @@ func TestNormalizeTokenAccountInfo(t *testing.T) {
 	}
 }
 
+func TestNormalizeTokenAccountInfo_LiveFixture(t *testing.T) {
+	info := normalizeTokenAccountInfo(loadUserFixture(t))
+
+	if info.Title != "fixture-user" || info.Username != "fixture-user" || info.Email != "fixture@example.com" {
+		t.Fatalf("unexpected normalized account identity: %+v", info)
+	}
+	if info.FriendlyName != "Fixture User" || info.UUID != "fixture-uuid" {
+		t.Fatalf("unexpected normalized account profile: %+v", info)
+	}
+	if !info.HasPassword || info.Home || info.HomeAdmin || info.Guest || info.Restricted || info.Confirmed || info.Anonymous || info.TwoFactorEnabled {
+		t.Fatalf("unexpected normalized account flags: %+v", info)
+	}
+	if !info.SubscriptionActive || info.SubscriptionStatus != "Active" || info.SubscriptionPlan != "monthly" {
+		t.Fatalf("unexpected normalized subscription info: %+v", info)
+	}
+	if len(info.Roles) != 1 || info.Roles[0] != "member" || len(info.Entitlements) != 1 || info.Entitlements[0] != "sync" {
+		t.Fatalf("unexpected normalized roles or entitlements: %+v", info)
+	}
+}
+
 func TestNormalizeTokenResourceInfo(t *testing.T) {
 	platform := "linux"
 	device := "server"
@@ -318,6 +375,38 @@ func TestNormalizeTokenResourceInfo(t *testing.T) {
 	}
 	if len(info.Connections) != 1 || info.Connections[0].URI != "https://10.0.0.5:32400" {
 		t.Fatalf("unexpected normalized connections: %+v", info.Connections)
+	}
+}
+
+func TestNormalizeTokenResourceInfos_LiveFixture(t *testing.T) {
+	items := normalizeTokenResourceInfos(loadResourcesFixture(t))
+	if len(items) != 1 {
+		t.Fatalf("expected 1 normalized resource, got %d", len(items))
+	}
+
+	item := items[0]
+	if item.Name != "fixture-server" || item.Product != "Plex Media Server" || item.Provides != "server" {
+		t.Fatalf("unexpected normalized resource identity: %+v", item)
+	}
+	if item.Platform != "Linux" || item.Device != "ASRock Z390 Steel Legend" {
+		t.Fatalf("unexpected normalized resource host details: %+v", item)
+	}
+	if item.ClientIdentifier != "fixture-server-id" || item.PublicAddress != "203.0.113.10" {
+		t.Fatalf("unexpected normalized resource addressing: %+v", item)
+	}
+	if !item.Owned || !item.Presence || item.Home || item.Relay || item.ConnectionCount != 1 {
+		t.Fatalf("unexpected normalized resource flags: %+v", item)
+	}
+	if len(item.Connections) != 1 {
+		t.Fatalf("expected 1 connection, got %d", len(item.Connections))
+	}
+
+	conn := item.Connections[0]
+	if conn.Protocol != "https" || conn.Address != "192.0.2.10" || conn.Port != 32400 || conn.URI != "https://fixture-server.plex.direct:32400" {
+		t.Fatalf("unexpected normalized connection details: %+v", conn)
+	}
+	if !conn.Local || conn.Relay || conn.IPv6 {
+		t.Fatalf("unexpected normalized connection flags: %+v", conn)
 	}
 }
 
@@ -394,5 +483,26 @@ func TestDiscoverServers_UsesSDKResources(t *testing.T) {
 	}
 	if servers[0].Name != "MediaBox" || len(servers[0].Connections) != 1 {
 		t.Fatalf("unexpected normalized server: %+v", servers[0])
+	}
+}
+
+func TestNormalizeServerResources_LiveFixture(t *testing.T) {
+	servers := normalizeServerResources(loadResourcesFixture(t))
+	if len(servers) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(servers))
+	}
+
+	server := servers[0]
+	if server.Name != "fixture-server" || server.Product != "Plex Media Server" || server.ClientIdentifier != "fixture-server-id" {
+		t.Fatalf("unexpected normalized server identity: %+v", server)
+	}
+	if !server.Owned || !server.Presence {
+		t.Fatalf("unexpected normalized server flags: %+v", server)
+	}
+	if len(server.Connections) != 1 {
+		t.Fatalf("expected 1 server connection, got %d", len(server.Connections))
+	}
+	if server.Connections[0].URI != "https://fixture-server.plex.direct:32400" || server.Connections[0].Protocol != "https" || !server.Connections[0].Local {
+		t.Fatalf("unexpected normalized server connection: %+v", server.Connections[0])
 	}
 }

@@ -1,0 +1,27 @@
+{
+  "id": 647495,
+  "title": "fixture-user",
+  "username": "fixture-user",
+  "email": "fixture@example.com",
+  "friendlyName": "Fixture User",
+  "uuid": "fixture-uuid",
+  "home": false,
+  "homeAdmin": false,
+  "guest": false,
+  "restricted": false,
+  "confirmed": false,
+  "anonymous": false,
+  "hasPassword": true,
+  "twoFactorEnabled": false,
+  "roles": [
+    "member"
+  ],
+  "entitlements": [
+    "sync"
+  ],
+  "subscription": {
+    "active": true,
+    "status": "Active",
+    "plan": "monthly"
+  }
+}
