@@ -106,7 +106,7 @@ func (c *AudioCheckCmd) extractAudioInfo(item *components.Metadata) []AudioInfo 
 		}
 
 		if media.AudioChannels != nil {
-			info.Channels = int(*media.AudioChannels)
+			info.Channels = *media.AudioChannels
 		}
 
 		infos = append(infos, info)

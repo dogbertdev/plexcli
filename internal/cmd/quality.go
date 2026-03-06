@@ -110,7 +110,7 @@ func (c *QualityCheckCmd) extractQualityInfo(item *components.Metadata) QualityI
 		}
 
 		if media.Height != nil {
-			info.Height = int(*media.Height)
+			info.Height = *media.Height
 		}
 
 		if len(media.Part) > 0 {

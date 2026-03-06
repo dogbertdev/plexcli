@@ -120,7 +120,7 @@ func (c *UnwatchedCmd) toOutputItems(items []*components.Metadata) []UnwatchedIt
 		}
 
 		if item.Year != nil {
-			ui.Year = int(*item.Year)
+			ui.Year = *item.Year
 		}
 
 		if item.AddedAt > 0 {
