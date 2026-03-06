@@ -105,7 +105,7 @@ func (c *SubtitlesMissingCmd) extractSubtitleInfo(item *components.Metadata, req
 	}
 
 	if item.Year != nil {
-		info.Year = int(*item.Year)
+		info.Year = *item.Year
 	}
 
 	availableLangs := make(map[string]bool)
