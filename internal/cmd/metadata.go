@@ -77,7 +77,7 @@ func (c *MetadataMissingCmd) checkMetadata(items []*components.Metadata) []Metad
 			}
 
 			if item.Year != nil {
-				info.Year = int(*item.Year)
+				info.Year = *item.Year
 			}
 
 			results = append(results, info)
