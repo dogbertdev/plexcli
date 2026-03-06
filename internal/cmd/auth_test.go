@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
@@ -108,6 +109,37 @@ func TestAuthTokenInfoRunRequiresToken(t *testing.T) {
 	}
 }
 
+func TestAuthTokenInfoRunUsesResolvedRuntimeToken(t *testing.T) {
+	originalResolveToken := resolveToken
+	originalInspectToken := inspectToken
+	resolveToken = func(ctx context.Context, cfg config.Config) (string, error) {
+		if cfg.Username != "paul" || cfg.Password != "secret" {
+			t.Fatalf("unexpected config passed to resolver: %+v", cfg)
+		}
+		return "runtime-token", nil
+	}
+	inspectToken = func(ctx context.Context, token string) (*auth.TokenInfo, error) {
+		if token != "runtime-token" {
+			t.Fatalf("expected runtime token, got %q", token)
+		}
+		return &auth.TokenInfo{}, nil
+	}
+	defer func() {
+		resolveToken = originalResolveToken
+		inspectToken = originalInspectToken
+	}()
+
+	out := &bytes.Buffer{}
+	errOut := &bytes.Buffer{}
+	u := ui.New(ui.Options{Out: out, Err: errOut, ColorMode: ui.ColorNever})
+
+	cmd := AuthTokenInfoCmd{Output: "json"}
+	cfg := &config.Config{Username: "paul", Password: "secret"}
+	if err := cmd.Run(nil, u, cfg); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
 func TestAuthTokenInfoOutputTable(t *testing.T) {
 	out := &bytes.Buffer{}
 	cmd := AuthTokenInfoCmd{Output: "table"}
@@ -185,6 +217,30 @@ func TestAuthTokenInfoOutputJSON(t *testing.T) {
 	}
 	if decoded.Account.Title != "Paul" || len(decoded.Resources) != 1 || decoded.Resources[0].ClientIdentifier != "server-123" {
 		t.Fatalf("unexpected JSON payload: %+v", decoded)
+	}
+	if strings.Contains(out.String(), "access_token") {
+		t.Fatalf("expected JSON payload to omit access_token, got: %s", out.String())
+	}
+}
+
+func TestFlattenTokenResourceItemsNoConnections(t *testing.T) {
+	items := flattenTokenResourceItems([]auth.TokenResourceInfo{
+		{
+			Name:             "Offline Box",
+			Product:          "Plex Media Server",
+			ClientIdentifier: "server-123",
+			ConnectionCount:  0,
+		},
+	})
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 flattened item, got %d", len(items))
+	}
+	if items[0].ConnectionIndex != 0 {
+		t.Fatalf("expected connection index 0 for resource without connections, got %d", items[0].ConnectionIndex)
+	}
+	if items[0].ConnectionCount != 0 {
+		t.Fatalf("expected connection count 0, got %d", items[0].ConnectionCount)
 	}
 }
 

@@ -52,7 +52,6 @@ type TokenResourceInfo struct {
 	ClientIdentifier       string                `json:"client_identifier"`
 	Provides               string                `json:"provides"`
 	PublicAddress          string                `json:"public_address"`
-	AccessToken            string                `json:"access_token"`
 	Owned                  bool                  `json:"owned"`
 	Home                   bool                  `json:"home"`
 	Synced                 bool                  `json:"synced"`
@@ -243,7 +242,6 @@ func normalizeTokenResourceInfo(resource components.PlexDevice) TokenResourceInf
 		ClientIdentifier:       resource.ClientIdentifier,
 		Provides:               resource.Provides,
 		PublicAddress:          resource.PublicAddress,
-		AccessToken:            resource.AccessToken,
 		Owned:                  resource.Owned,
 		Home:                   resource.Home,
 		Synced:                 resource.Synced,

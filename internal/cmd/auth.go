@@ -26,6 +26,7 @@ type AuthCmd struct {
 }
 
 var inspectToken = auth.InspectToken
+var resolveToken = auth.GetToken
 
 type AuthLoginCmd struct {
 	Username string `help:"Plex username or email" short:"u" env:"PLEX_USERNAME" default:""`
@@ -292,14 +293,15 @@ func (c *AuthTokenInfoCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) 
 	if cfg == nil {
 		return fmt.Errorf("configuration is required")
 	}
-	if cfg.Token == "" {
-		return fmt.Errorf("token is required to inspect token info; use --token, PLEX_TOKEN, or run 'plex auth login --browser' first")
-	}
-
 	authCtx, cancel := context.WithTimeout(context.Background(), auth.DefaultTimeout)
 	defer cancel()
 
-	info, err := inspectToken(authCtx, cfg.Token)
+	token, err := resolveToken(authCtx, *cfg)
+	if err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+
+	info, err := inspectToken(authCtx, token)
 	if err != nil {
 		return fmt.Errorf("failed to inspect token info: %w", err)
 	}
@@ -356,7 +358,7 @@ func flattenTokenResourceItems(resources []auth.TokenResourceInfo) []AuthTokenRe
 		if len(resource.Connections) == 0 {
 			items = append(items, AuthTokenResourceItem{
 				ResourceIndex:   i + 1,
-				ConnectionIndex: 1,
+				ConnectionIndex: 0,
 				Name:            resource.Name,
 				Product:         resource.Product,
 				Provides:        resource.Provides,
