@@ -333,7 +333,7 @@ func librarySectionTypeIDValue(value string) (int64, bool) {
 		return 1, true
 	case "show":
 		return 2, true
-	case "music":
+	case "music", "artist":
 		return 8, true
 	case "photo":
 		return 13, true

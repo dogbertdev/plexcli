@@ -114,6 +114,31 @@ func TestSectionTypeIDForLibrary(t *testing.T) {
 	}
 }
 
+func TestSectionTypeIDForLibraryMapsArtistSectionsToMusicType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/library/sections" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><MediaContainer><Directory key="7" title="Audiobooks" type="artist" /></MediaContainer>`))
+	}))
+	defer server.Close()
+
+	client, err := plexclient.NewClient(server.URL, "token")
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	sectionTypeID, err := sectionTypeIDForLibrary(context.Background(), client, "7")
+	if err != nil {
+		t.Fatalf("sectionTypeIDForLibrary() error = %v", err)
+	}
+	if sectionTypeID != 8 {
+		t.Fatalf("expected artist section to map to music type ID 8, got %d", sectionTypeID)
+	}
+}
+
 func TestSectionTypeIDForLibraryFailsForUnknownSection(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/library/sections" {
