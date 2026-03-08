@@ -55,8 +55,8 @@ type BulkUpdateInput struct {
 	Filter     string
 	Set        map[string]string
 	Lock       []string
-	AddTags    map[string]string
-	RemoveTags map[string]string
+	AddTags    map[string][]string
+	RemoveTags map[string][]string
 }
 
 func ParseCSVList(input string) ([]string, error) {
@@ -94,6 +94,27 @@ func ParseKeyValuePairs(values []string) (map[string]string, error) {
 			return nil, fmt.Errorf("invalid key=value pair %q", value)
 		}
 		parsed[key] = val
+	}
+	return parsed, nil
+}
+
+func ParseMultiValuePairs(values []string) (map[string][]string, error) {
+	if len(values) == 0 {
+		return nil, fmt.Errorf("at least one key=value pair is required")
+	}
+
+	parsed := make(map[string][]string, len(values))
+	for _, value := range values {
+		key, val, ok := strings.Cut(value, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid key=value pair %q", value)
+		}
+		key = strings.TrimSpace(key)
+		val = strings.TrimSpace(val)
+		if key == "" {
+			return nil, fmt.Errorf("invalid key=value pair %q", value)
+		}
+		parsed[key] = append(parsed[key], val)
 	}
 	return parsed, nil
 }
@@ -295,11 +316,15 @@ func (c *Client) UpdateItemsDynamic(ctx context.Context, input BulkUpdateInput) 
 			query.Set(fmt.Sprintf("%s.locked", key), "1")
 		}
 	}
-	for tagType, value := range input.AddTags {
-		query.Set(fmt.Sprintf("%s[].tag.tag", tagType), value)
+	for tagType, values := range input.AddTags {
+		for _, value := range values {
+			query.Add(fmt.Sprintf("%s[].tag.tag", tagType), value)
+		}
 	}
-	for tagType, value := range input.RemoveTags {
-		query.Set(fmt.Sprintf("%s[].tag.tag-", tagType), value)
+	for tagType, values := range input.RemoveTags {
+		for _, value := range values {
+			query.Add(fmt.Sprintf("%s[].tag.tag-", tagType), value)
+		}
 	}
 	return c.LibraryAction(ctx, "UpdateItems", http.MethodPut, fmt.Sprintf("library/sections/%s/all", url.PathEscape(input.SectionID)), query)
 }

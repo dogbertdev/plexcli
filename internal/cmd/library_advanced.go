@@ -460,11 +460,11 @@ func (c *LibraryItemBulkUpdateCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.
 	if err != nil && len(c.Set) > 0 {
 		return err
 	}
-	addTags, err := parseKeyValueFlags(c.AddTags)
+	addTags, err := parseMultiValueFlags(c.AddTags)
 	if err != nil && len(c.AddTags) > 0 {
 		return err
 	}
-	removeTags, err := parseKeyValueFlags(c.RemoveTag)
+	removeTags, err := parseMultiValueFlags(c.RemoveTag)
 	if err != nil && len(c.RemoveTag) > 0 {
 		return err
 	}

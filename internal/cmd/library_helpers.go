@@ -32,6 +32,13 @@ func parseKeyValueFlags(values []string) (map[string]string, error) {
 	return plexclient.ParseKeyValuePairs(values)
 }
 
+func parseMultiValueFlags(values []string) (map[string][]string, error) {
+	if len(values) == 0 {
+		return map[string][]string{}, nil
+	}
+	return plexclient.ParseMultiValuePairs(values)
+}
+
 func requireConfirmed(yes bool, action string) error {
 	return plexclient.RequireConfirmation(yes, action)
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -498,6 +499,42 @@ func TestUpdateItemsDynamicIncludesSectionMediaType(t *testing.T) {
 	}
 	if got := seenQuery.Get("title.value"); got != "Alien Nation" {
 		t.Fatalf("expected title.value query, got %q", got)
+	}
+}
+
+func TestUpdateItemsDynamicPreservesRepeatedTagValues(t *testing.T) {
+	var seenQuery url.Values
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenQuery = r.URL.Query()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "token")
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	err = client.UpdateItemsDynamic(context.Background(), BulkUpdateInput{
+		SectionID: "10",
+		MediaType: 1,
+		AddTags: map[string][]string{
+			"genre": []string{"Action", "Drama"},
+		},
+		RemoveTags: map[string][]string{
+			"collection": []string{"Archive", "Replace"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateItemsDynamic() error = %v", err)
+	}
+
+	if got := seenQuery["genre[].tag.tag"]; !reflect.DeepEqual(got, []string{"Action", "Drama"}) {
+		t.Fatalf("expected repeated genre tags, got %#v", got)
+	}
+	if got := seenQuery["collection[].tag.tag-"]; !reflect.DeepEqual(got, []string{"Archive", "Replace"}) {
+		t.Fatalf("expected repeated collection tag removals, got %#v", got)
 	}
 }
 

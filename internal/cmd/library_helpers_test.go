@@ -22,6 +22,19 @@ func TestParseKeyValueFlags(t *testing.T) {
 	}
 }
 
+func TestParseMultiValueFlags(t *testing.T) {
+	got, err := parseMultiValueFlags([]string{"genre=Action", "genre=Drama", "collection=Favorites"})
+	if err != nil {
+		t.Fatalf("parseMultiValueFlags() error = %v", err)
+	}
+	if len(got["genre"]) != 2 || got["genre"][0] != "Action" || got["genre"][1] != "Drama" {
+		t.Fatalf("unexpected genre values: %#v", got["genre"])
+	}
+	if len(got["collection"]) != 1 || got["collection"][0] != "Favorites" {
+		t.Fatalf("unexpected collection values: %#v", got["collection"])
+	}
+}
+
 func TestGenericRowsForMediaContainerMetadata(t *testing.T) {
 	header, rows := genericRows(map[string]any{
 		"MediaContainer": map[string]any{
