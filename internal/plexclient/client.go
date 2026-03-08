@@ -18,6 +18,7 @@ import (
 
 	"github.com/LukeHagar/plexgo"
 	"github.com/LukeHagar/plexgo/models/components"
+	plexretry "github.com/LukeHagar/plexgo/retry"
 
 	"github.com/dogbertdev/plexcli/internal/cache"
 )
@@ -110,14 +111,48 @@ func NewClient(serverURL, token string, opts ...ClientOption) (*Client, error) {
 		opt(client)
 	}
 
-	client.sdk = plexgo.New(
+	sdkOpts := []plexgo.SDKOption{
 		plexgo.WithSecurity(token),
 		plexgo.WithServerURL(serverURL),
 		plexgo.WithAccepts(components.AcceptsApplicationJSON),
-		plexgo.WithTimeout(client.httpClient.Timeout),
-	)
+		plexgo.WithClient(client.httpClient),
+	}
+	if retryConfig := sdkRetryConfig(client.maxRetries); retryConfig != nil {
+		sdkOpts = append(sdkOpts, plexgo.WithRetryConfig(*retryConfig))
+	}
+
+	client.sdk = plexgo.New(sdkOpts...)
 
 	return client, nil
+}
+
+func sdkRetryConfig(maxRetries int) *plexretry.Config {
+	if maxRetries <= 0 {
+		return nil
+	}
+
+	var maxElapsed time.Duration
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		backoff := time.Duration(math.Pow(RetryExponent, float64(attempt))) * time.Second
+		if backoff > MaxBackoffDuration {
+			backoff = MaxBackoffDuration
+		}
+		maxElapsed += backoff
+	}
+
+	// Give the final retry attempt a small budget after the last sleep.
+	maxElapsed += time.Second
+
+	return &plexretry.Config{
+		Strategy: "backoff",
+		Backoff: &plexretry.BackoffStrategy{
+			InitialInterval: int(time.Second / time.Millisecond),
+			MaxInterval:     int(MaxBackoffDuration / time.Millisecond),
+			Exponent:        RetryExponent,
+			MaxElapsedTime:  int(maxElapsed / time.Millisecond),
+		},
+		RetryConnectionErrors: true,
+	}
 }
 
 // PlexError provides structured error information for Plex API operations.
