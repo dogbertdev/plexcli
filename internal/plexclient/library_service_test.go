@@ -520,10 +520,10 @@ func TestUpdateItemsDynamicPreservesRepeatedTagValues(t *testing.T) {
 		SectionID: "10",
 		MediaType: 1,
 		AddTags: map[string][]string{
-			"genre": []string{"Action", "Drama"},
+			"genre": {"Action", "Drama"},
 		},
 		RemoveTags: map[string][]string{
-			"collection": []string{"Archive", "Replace"},
+			"collection": {"Archive", "Replace"},
 		},
 	})
 	if err != nil {
