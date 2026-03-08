@@ -317,8 +317,8 @@ func (c *Client) UpdateItemsDynamic(ctx context.Context, input BulkUpdateInput) 
 		}
 	}
 	for tagType, values := range input.AddTags {
-		for _, value := range values {
-			query.Add(fmt.Sprintf("%s[].tag.tag", tagType), value)
+		for i, value := range values {
+			query.Set(fmt.Sprintf("%s[%d].tag.tag", tagType, i), value)
 		}
 	}
 	for tagType, values := range input.RemoveTags {
