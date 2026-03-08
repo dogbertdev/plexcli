@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/alecthomas/kong"
+
 	"github.com/dogbertdev/plexcli/internal/config"
 )
 
