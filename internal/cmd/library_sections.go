@@ -257,7 +257,7 @@ func (c *LibrarySectionSortsCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Co
 }
 
 func (c *LibrarySectionLettersCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	return runLibraryJSONCommand(u, cfg, c.Output, "GetFirstCharacters", fmt.Sprintf("library/sections/%s/firstCharacter", url.PathEscape(c.Section)), nil)
+	return runLibraryJSONCommand(u, cfg, c.Output, "GetFirstCharacters", sectionLettersPath(c.Section), nil)
 }
 
 func (c *LibrarySectionImageCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
@@ -325,6 +325,10 @@ func (c *LibraryRefreshStopAllCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.
 func librarySectionTypeID(value string) int64 {
 	sectionTypeID, _ := librarySectionTypeIDValue(value)
 	return sectionTypeID
+}
+
+func sectionLettersPath(section string) string {
+	return fmt.Sprintf("library/sections/%s/firstCharacters", url.PathEscape(section))
 }
 
 func librarySectionTypeIDValue(value string) (int64, bool) {

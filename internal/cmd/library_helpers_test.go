@@ -176,3 +176,11 @@ func TestSectionTypeIDForLibraryFailsForUnknownSection(t *testing.T) {
 		t.Fatalf("unexpected sectionTypeIDForLibrary() error: %v", err)
 	}
 }
+
+func TestSectionLettersPath(t *testing.T) {
+	got := sectionLettersPath("10")
+	want := "library/sections/10/firstCharacters"
+	if got != want {
+		t.Fatalf("sectionLettersPath() = %q, want %q", got, want)
+	}
+}
