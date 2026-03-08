@@ -275,7 +275,7 @@ type LibraryMediaExtrasCmd struct {
 	Output string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 type LibraryMediaFileCmd struct {
-	IDs    string `arg:"" name:"ids" help:"Comma-separated metadata IDs"`
+	IDs    string `arg:"" optional:"" name:"ids" help:"Comma-separated metadata IDs for bundle-style file fetches"`
 	URL    string `help:"Bundle URL to fetch"`
 	Output string `help:"Destination file path" type:"path" required:""`
 }
@@ -852,7 +852,19 @@ func (c *LibraryArtworkGetCmd) validate() error {
 }
 
 func (c *LibraryMediaFileCmd) validate() error {
-	return requireOutputPath(c.Output)
+	if err := requireOutputPath(c.Output); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.URL) == "" {
+		return fmt.Errorf("--url is required")
+	}
+	if strings.HasPrefix(c.URL, "/") {
+		return nil
+	}
+	if strings.TrimSpace(c.IDs) == "" {
+		return fmt.Errorf("ids are required unless --url is a direct Plex library path")
+	}
+	return nil
 }
 
 func (c *LibraryMediaPartIndexCmd) validate() error {

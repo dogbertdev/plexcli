@@ -89,3 +89,41 @@ func TestLibraryMediaBinaryCommandsRequireOutput(t *testing.T) {
 		})
 	}
 }
+
+func TestLibraryMediaFileCmdValidationModes(t *testing.T) {
+	tests := []struct {
+		name    string
+		cmd     LibraryMediaFileCmd
+		wantErr bool
+	}{
+		{
+			name:    "missing url",
+			cmd:     LibraryMediaFileCmd{Output: "/tmp/file"},
+			wantErr: true,
+		},
+		{
+			name:    "direct plex path without ids",
+			cmd:     LibraryMediaFileCmd{URL: "/library/metadata/27017/theme/1771256497", Output: "/tmp/file"},
+			wantErr: false,
+		},
+		{
+			name:    "bundle url without ids",
+			cmd:     LibraryMediaFileCmd{URL: "metadata://theme", Output: "/tmp/file"},
+			wantErr: true,
+		},
+		{
+			name:    "bundle url with ids",
+			cmd:     LibraryMediaFileCmd{IDs: "27017", URL: "metadata://theme", Output: "/tmp/file"},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cmd.validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

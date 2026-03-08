@@ -153,7 +153,7 @@ plex library discover autocomplete 1 --query sta
 
 # Download binary helpers
 plex library artwork get 12345 --element poster --output /tmp/poster.jpg
-plex library media file 27017 --url /library/metadata/27017/theme/1771256497 --output /tmp/theme.mp3
+plex library media file --url /library/metadata/27017/theme/1771256497 --output /tmp/theme.mp3
 plex library media part 38540 1704960287 file.mkv --output /tmp/episode.mkv
 plex library media part-index 77 sd --interval 1000 --output /tmp/index.bif
 plex library media stream get 77 srt --output /tmp/subtitle.srt
