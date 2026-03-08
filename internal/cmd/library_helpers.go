@@ -253,17 +253,21 @@ func runLibraryMutationSummary(u *ui.UI, output string, summary plexclient.Libra
 	return outputLibraryActionResults(u.Out(), output, results)
 }
 
-func sectionTypeIDForLibrary(ctx context.Context, client *plexclient.Client, sectionID string) int64 {
+func sectionTypeIDForLibrary(ctx context.Context, client *plexclient.Client, sectionID string) (int64, error) {
 	sections, err := client.GetSections(ctx)
 	if err != nil {
-		return 1
+		return 0, fmt.Errorf("resolve section %s type: %w", sectionID, err)
 	}
 
 	for _, section := range sections {
 		if section.ID == sectionID {
-			return librarySectionTypeID(section.Type)
+			sectionTypeID, ok := librarySectionTypeIDValue(section.Type)
+			if !ok {
+				return 0, fmt.Errorf("resolve section %s type: unsupported section type %q", sectionID, section.Type)
+			}
+			return sectionTypeID, nil
 		}
 	}
 
-	return 1
+	return 0, fmt.Errorf("resolve section %s type: section not found", sectionID)
 }

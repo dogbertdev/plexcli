@@ -323,17 +323,22 @@ func (c *LibraryRefreshStopAllCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.
 }
 
 func librarySectionTypeID(value string) int64 {
+	sectionTypeID, _ := librarySectionTypeIDValue(value)
+	return sectionTypeID
+}
+
+func librarySectionTypeIDValue(value string) (int64, bool) {
 	switch strings.ToLower(value) {
 	case "movie":
-		return 1
+		return 1, true
 	case "show":
-		return 2
+		return 2, true
 	case "music":
-		return 8
+		return 8, true
 	case "photo":
-		return 13
+		return 13, true
 	default:
-		return 1
+		return 0, false
 	}
 }
 

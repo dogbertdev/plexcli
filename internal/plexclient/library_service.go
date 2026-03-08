@@ -801,8 +801,6 @@ func librarySDKFriendlyError(op string, err error) error {
 		return nil
 	}
 	switch {
-	case op == "DetectIntros" && strings.Contains(err.Error(), "Status 400"):
-		return errors.New("intro detection is not available for this target; Plex often expects a season ID")
 	case op == "SetStreamOffset" && strings.Contains(err.Error(), "Status 400"):
 		return errors.New("stream offset update was rejected by Plex")
 	case op == "GetStream" && strings.Contains(err.Error(), "Status 501"):

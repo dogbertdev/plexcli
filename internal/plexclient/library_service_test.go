@@ -98,13 +98,11 @@ func TestLibraryHTTPFriendlyError(t *testing.T) {
 }
 
 func TestLibrarySDKFriendlyError(t *testing.T) {
-	got := librarySDKFriendlyError("DetectIntros", errors.New("API error occurred: Status 400"))
-	if got == nil || got.Error() != "intro detection is not available for this target; Plex often expects a season ID" {
-		t.Fatalf("unexpected DetectIntros friendly error: %v", got)
-	}
-
 	if got := librarySDKFriendlyError("DetectCredits", errors.New("API error occurred: Status 400")); got != nil {
 		t.Fatalf("did not expect friendly error for DetectCredits: %v", got)
+	}
+	if got := librarySDKFriendlyError("DetectIntros", errors.New("API error occurred: Status 400")); got != nil {
+		t.Fatalf("did not expect friendly error for DetectIntros: %v", got)
 	}
 }
 

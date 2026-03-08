@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"bytes"
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -83,5 +86,55 @@ func TestRequireConfirmed(t *testing.T) {
 func TestRequireOutputPath(t *testing.T) {
 	if err := requireOutputPath(""); err == nil {
 		t.Fatalf("expected requireOutputPath() error")
+	}
+}
+
+func TestSectionTypeIDForLibrary(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/library/sections" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><MediaContainer><Directory key="10" title="Anime" type="show" /></MediaContainer>`))
+	}))
+	defer server.Close()
+
+	client, err := plexclient.NewClient(server.URL, "token")
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	sectionTypeID, err := sectionTypeIDForLibrary(context.Background(), client, "10")
+	if err != nil {
+		t.Fatalf("sectionTypeIDForLibrary() error = %v", err)
+	}
+	if sectionTypeID != 2 {
+		t.Fatalf("expected show type ID 2, got %d", sectionTypeID)
+	}
+}
+
+func TestSectionTypeIDForLibraryFailsForUnknownSection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/library/sections" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><MediaContainer><Directory key="10" title="Anime" type="show" /></MediaContainer>`))
+	}))
+	defer server.Close()
+
+	client, err := plexclient.NewClient(server.URL, "token")
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	_, err = sectionTypeIDForLibrary(context.Background(), client, "99")
+	if err == nil {
+		t.Fatalf("expected sectionTypeIDForLibrary() error")
+	}
+	if !strings.Contains(err.Error(), "section not found") {
+		t.Fatalf("unexpected sectionTypeIDForLibrary() error: %v", err)
 	}
 }

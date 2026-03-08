@@ -469,9 +469,13 @@ func (c *LibraryItemBulkUpdateCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.
 		return err
 	}
 	return runSimpleClientAction(cfg, u, c.Output, "item-bulk-update", c.Section, "bulk update requested", func(runCtx context.Context, client *plexclient.Client) error {
+		sectionTypeID, err := sectionTypeIDForLibrary(runCtx, client, c.Section)
+		if err != nil {
+			return err
+		}
 		return client.UpdateItemsDynamic(runCtx, plexclient.BulkUpdateInput{
 			SectionID:  c.Section,
-			MediaType:  sectionTypeIDForLibrary(runCtx, client, c.Section),
+			MediaType:  sectionTypeID,
 			Filter:     c.Filter,
 			Set:        setValues,
 			Lock:       c.Lock,
@@ -579,8 +583,12 @@ func (c *LibraryDiscoverCollectionsCmd) Run(ctx *kong.Context, u *ui.UI, cfg *co
 
 func (c *LibraryDiscoverCommonCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
 	return runWithClient(cfg, func(runCtx context.Context, client *plexclient.Client) error {
+		sectionTypeID, err := sectionTypeIDForLibrary(runCtx, client, c.Section)
+		if err != nil {
+			return err
+		}
 		query := url.Values{}
-		query.Set("type", strconv.FormatInt(sectionTypeIDForLibrary(runCtx, client, c.Section), 10))
+		query.Set("type", strconv.FormatInt(sectionTypeID, 10))
 
 		payload, err := client.LibraryJSON(runCtx, "GetCommon", http.MethodGet, fmt.Sprintf("library/sections/%s/common", url.PathEscape(c.Section)), query)
 		if err != nil {
@@ -604,8 +612,12 @@ func (c *LibraryDiscoverSonicCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.C
 
 func (c *LibraryDiscoverAutocompleteCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
 	return runWithClient(cfg, func(runCtx context.Context, client *plexclient.Client) error {
+		sectionTypeID, err := sectionTypeIDForLibrary(runCtx, client, c.Section)
+		if err != nil {
+			return err
+		}
 		query := url.Values{}
-		query.Set("type", strconv.FormatInt(sectionTypeIDForLibrary(runCtx, client, c.Section), 10))
+		query.Set("type", strconv.FormatInt(sectionTypeID, 10))
 		query.Set(fmt.Sprintf("%s.query", c.Field), c.Query)
 
 		payload, err := client.LibraryJSON(runCtx, "Autocomplete", http.MethodGet, fmt.Sprintf("library/sections/%s/autocomplete", url.PathEscape(c.Section)), query)
