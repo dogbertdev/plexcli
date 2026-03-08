@@ -126,6 +126,41 @@ plex library clean 1
 
 # Show active activities/background tasks
 plex library status
+
+# Show details for a section
+plex library section show 1
+
+# Create or edit a section
+plex library section create "Movies" --type movie --agent tv.plex.agents.movie --location /srv/media/movies
+plex library section edit 1 --language en-AU --pref languageOverride=en-AU
+
+# Cancel one section refresh or stop all refreshes
+plex library refresh cancel 1
+plex library refresh stop-all --yes
+
+# Update item metadata and preferences
+plex library item edit 12345 --set title="New Title" --lock title
+plex library item prefs set 12345 --pref introDetection=1
+plex library section prefs defaults --type movie --agent tv.plex.agents.movie
+
+# Run advanced detectors
+plex library detect intros 27018 --force
+plex library detect status 999
+
+# Use discovery helpers
+plex library discover collections 1
+plex library discover autocomplete 1 --query sta
+
+# Download binary helpers
+plex library artwork get 12345 --element poster --output /tmp/poster.jpg
+plex library media file 27017 --url /library/metadata/27017/theme/1771256497 --output /tmp/theme.mp3
+plex library media part 38540 1704960287 file.mkv --output /tmp/episode.mkv
+plex library media part-index 77 sd --interval 1000 --output /tmp/index.bif
+plex library media stream get 77 srt --output /tmp/subtitle.srt
+
+# Attach subtitles from a URL or local file
+plex library subtitle add 12345 --url https://example.com/subs/en.srt --language eng
+plex library subtitle add 12345 --file ./subs/en.srt --language eng --format srt
 ```
 
 #### Authenticate

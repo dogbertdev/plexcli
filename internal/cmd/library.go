@@ -15,10 +15,19 @@ import (
 )
 
 type LibraryCmd struct {
-	List   LibrariesCmd     `cmd:"" help:"List library sections"`
-	Update LibraryUpdateCmd `cmd:"" help:"Refresh one library section or all sections"`
-	Clean  LibraryCleanCmd  `cmd:"" help:"Empty trash for one library section or all sections"`
-	Status LibraryStatusCmd `cmd:"" help:"Show active server tasks and activities"`
+	List     LibrariesCmd       `cmd:"" help:"List library sections"`
+	Update   LibraryUpdateCmd   `cmd:"" help:"Refresh one library section or all sections"`
+	Clean    LibraryCleanCmd    `cmd:"" help:"Empty trash for one library section or all sections"`
+	Status   LibraryStatusCmd   `cmd:"" help:"Show active server tasks and activities"`
+	Section  LibrarySectionCmd  `cmd:"" help:"Manage library sections and section preferences"`
+	Refresh  LibraryRefreshCmd  `cmd:"" help:"Cancel or stop library refresh operations"`
+	Item     LibraryItemCmd     `cmd:"" help:"Mutate and inspect library metadata items"`
+	Subtitle LibrarySubtitleCmd `cmd:"" help:"Attach subtitles to library items"`
+	Artwork  LibraryArtworkCmd  `cmd:"" help:"Manage metadata artwork"`
+	Detect   LibraryDetectCmd   `cmd:"" help:"Run advanced detection and analysis operations"`
+	Discover LibraryDiscoverCmd `cmd:"" help:"Use discovery and similarity endpoints"`
+	Person   LibraryPersonCmd   `cmd:"" help:"Inspect person details and credits"`
+	Media    LibraryMediaCmd    `cmd:"" help:"Inspect and download media helpers"`
 }
 
 type LibraryUpdateCmd struct {

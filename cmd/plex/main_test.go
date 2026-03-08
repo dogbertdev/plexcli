@@ -74,3 +74,14 @@ func TestLoadConfigAppliesCacheFlagsWhenSet(t *testing.T) {
 		t.Fatalf("expected CacheRefresh=true")
 	}
 }
+
+func TestApplyOutputFormatDoesNotOverwritePartIndexPath(t *testing.T) {
+	cli := &CLI{}
+	cli.Library.Media.PartIndex.Output = "/tmp/index.bif"
+
+	applyOutputFormat(cli, "json")
+
+	if cli.Library.Media.PartIndex.Output != "/tmp/index.bif" {
+		t.Fatalf("expected part-index output path to be preserved, got %q", cli.Library.Media.PartIndex.Output)
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/LukeHagar/plexgo"
 	"github.com/LukeHagar/plexgo/models/components"
 
 	"github.com/dogbertdev/plexcli/internal/cache"
@@ -51,6 +52,7 @@ type Client struct {
 	serverURL           string
 	token               string
 	maxRetries          int
+	sdk                 *plexgo.PlexAPI
 	libraryCache        *cache.LibraryPayloadCache
 	libraryCacheTTL     time.Duration
 	libraryCacheRefresh bool
@@ -107,6 +109,13 @@ func NewClient(serverURL, token string, opts ...ClientOption) (*Client, error) {
 	for _, opt := range opts {
 		opt(client)
 	}
+
+	client.sdk = plexgo.New(
+		plexgo.WithSecurity(token),
+		plexgo.WithServerURL(serverURL),
+		plexgo.WithAccepts(components.AcceptsApplicationJSON),
+		plexgo.WithTimeout(client.httpClient.Timeout),
+	)
 
 	return client, nil
 }
