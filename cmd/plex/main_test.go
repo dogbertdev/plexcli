@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/alecthomas/kong"
+
 	"github.com/dogbertdev/plexcli/internal/config"
 )
 
@@ -72,5 +74,33 @@ func TestLoadConfigAppliesCacheFlagsWhenSet(t *testing.T) {
 	}
 	if !got.CacheRefresh {
 		t.Fatalf("expected CacheRefresh=true")
+	}
+}
+
+func TestApplyOutputFormatDoesNotOverwritePartIndexPath(t *testing.T) {
+	cli := &CLI{}
+	cli.Library.Media.PartIndex.Output = "/tmp/index.bif"
+
+	applyOutputFormat(cli, "json")
+
+	if cli.Library.Media.PartIndex.Output != "/tmp/index.bif" {
+		t.Fatalf("expected part-index output path to be preserved, got %q", cli.Library.Media.PartIndex.Output)
+	}
+}
+
+func TestLibraryMediaFileParsesDirectLibraryPathWithoutIDs(t *testing.T) {
+	var cli CLI
+	parser, err := kong.New(&cli)
+	if err != nil {
+		t.Fatalf("kong.New() error = %v", err)
+	}
+
+	_, err = parser.Parse([]string{
+		"library", "media", "file",
+		"--url", "/library/metadata/27017/theme/1771256497",
+		"--output", "/tmp/theme.mp3",
+	})
+	if err != nil {
+		t.Fatalf("parser.Parse() error = %v", err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -16,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/LukeHagar/plexgo"
 	"github.com/LukeHagar/plexgo/models/components"
 
 	"github.com/dogbertdev/plexcli/internal/cache"
@@ -51,6 +53,7 @@ type Client struct {
 	serverURL           string
 	token               string
 	maxRetries          int
+	sdk                 *plexgo.PlexAPI
 	libraryCache        *cache.LibraryPayloadCache
 	libraryCacheTTL     time.Duration
 	libraryCacheRefresh bool
@@ -108,6 +111,15 @@ func NewClient(serverURL, token string, opts ...ClientOption) (*Client, error) {
 		opt(client)
 	}
 
+	sdkOpts := []plexgo.SDKOption{
+		plexgo.WithSecurity(token),
+		plexgo.WithServerURL(serverURL),
+		plexgo.WithAccepts(components.AcceptsApplicationJSON),
+		plexgo.WithClient(client.httpClient),
+	}
+
+	client.sdk = plexgo.New(sdkOpts...)
+
 	return client, nil
 }
 
@@ -133,10 +145,14 @@ func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if _, ok := err.(interface{ Temporary() bool }); ok {
+
+	var temporaryErr interface{ Temporary() bool }
+	if errors.As(err, &temporaryErr) && temporaryErr.Temporary() {
 		return true
 	}
-	if _, ok := err.(interface{ Timeout() bool }); ok {
+
+	var timeoutErr interface{ Timeout() bool }
+	if errors.As(err, &timeoutErr) && timeoutErr.Timeout() {
 		return true
 	}
 	return false
