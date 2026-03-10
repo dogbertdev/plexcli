@@ -4,10 +4,17 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 )
+
+type retryableTransportError struct{}
+
+func (retryableTransportError) Error() string   { return "temporary transport failure" }
+func (retryableTransportError) Temporary() bool { return true }
+func (retryableTransportError) Timeout() bool   { return true }
 
 func TestSDKBackedLibraryCallsUseSharedTransportAndRetries(t *testing.T) {
 	client, err := NewClient("http://127.0.0.1:1", "token", WithTimeout(50*time.Millisecond), WithMaxRetries(1))
@@ -18,18 +25,18 @@ func TestSDKBackedLibraryCallsUseSharedTransportAndRetries(t *testing.T) {
 	attempts := 0
 	client.httpClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		attempts++
-		statusCode := http.StatusOK
-		body := ""
 		if attempts == 1 {
-			statusCode = http.StatusServiceUnavailable
-		} else {
-			body = `{}`
+			return nil, &url.Error{
+				Op:  req.Method,
+				URL: req.URL.String(),
+				Err: retryableTransportError{},
+			}
 		}
 
 		return &http.Response{
-			StatusCode: statusCode,
-			Status:     http.StatusText(statusCode),
-			Body:       io.NopCloser(strings.NewReader(body)),
+			StatusCode: http.StatusOK,
+			Status:     http.StatusText(http.StatusOK),
+			Body:       io.NopCloser(strings.NewReader(`{}`)),
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
 			Request:    req,
 		}, nil

@@ -410,13 +410,17 @@ func (c *Client) UpdateItemArtworkByURL(ctx context.Context, ids, element, asset
 }
 
 func (c *Client) DeleteSection(ctx context.Context, sectionID string) error {
-	_, err := c.sdk.Library.DeleteLibrarySection(ctx, operations.DeleteLibrarySectionRequest{SectionID: sectionID})
-	return c.wrapSDKError("DeleteLibrarySection", sectionID, err)
+	return c.runSDKAction(ctx, "DeleteLibrarySection", sectionID, func(ctx context.Context) error {
+		_, err := c.sdk.Library.DeleteLibrarySection(ctx, operations.DeleteLibrarySectionRequest{SectionID: sectionID})
+		return err
+	})
 }
 
 func (c *Client) StopAllRefreshes(ctx context.Context) error {
-	_, err := c.sdk.Library.StopAllRefreshes(ctx)
-	return c.wrapSDKError("StopAllRefreshes", "", err)
+	return c.runSDKAction(ctx, "StopAllRefreshes", "", func(ctx context.Context) error {
+		_, err := c.sdk.Library.StopAllRefreshes(ctx)
+		return err
+	})
 }
 
 func (c *Client) GetSectionsPrefs(ctx context.Context, metadataType int64, agent string) (any, error) {
@@ -478,46 +482,38 @@ func (c *Client) resolveSectionEditInput(ctx context.Context, sectionID string, 
 }
 
 func (c *Client) DeleteMetadata(ctx context.Context, ids string) error {
-	encodedIDs, err := encodeMetadataIDs(ids)
-	if err != nil {
-		return &PlexError{Op: "DeleteMetadataItem", Err: err}
-	}
-	_, err = c.sdk.Library.DeleteMetadataItem(ctx, operations.DeleteMetadataItemRequest{Ids: encodedIDs})
-	return c.wrapSDKError("DeleteMetadataItem", encodedIDs, err)
+	return c.runMetadataSDKAction(ctx, "DeleteMetadataItem", ids, func(ctx context.Context, encodedIDs string) error {
+		_, err := c.sdk.Library.DeleteMetadataItem(ctx, operations.DeleteMetadataItemRequest{Ids: encodedIDs})
+		return err
+	})
 }
 
 func (c *Client) UnmatchMetadata(ctx context.Context, ids string) error {
-	encodedIDs, err := encodeMetadataIDs(ids)
-	if err != nil {
-		return &PlexError{Op: "Unmatch", Err: err}
-	}
-	_, err = c.sdk.Library.Unmatch(ctx, operations.UnmatchRequest{Ids: encodedIDs})
-	return c.wrapSDKError("Unmatch", encodedIDs, err)
+	return c.runMetadataSDKAction(ctx, "Unmatch", ids, func(ctx context.Context, encodedIDs string) error {
+		_, err := c.sdk.Library.Unmatch(ctx, operations.UnmatchRequest{Ids: encodedIDs})
+		return err
+	})
 }
 
 func (c *Client) SplitMetadata(ctx context.Context, ids string) error {
-	encodedIDs, err := encodeMetadataIDs(ids)
-	if err != nil {
-		return &PlexError{Op: "SplitItem", Err: err}
-	}
-	_, err = c.sdk.Library.SplitItem(ctx, operations.SplitItemRequest{Ids: encodedIDs})
-	return c.wrapSDKError("SplitItem", encodedIDs, err)
+	return c.runMetadataSDKAction(ctx, "SplitItem", ids, func(ctx context.Context, encodedIDs string) error {
+		_, err := c.sdk.Library.SplitItem(ctx, operations.SplitItemRequest{Ids: encodedIDs})
+		return err
+	})
 }
 
 func (c *Client) MergeMetadata(ctx context.Context, ids string) error {
-	encodedIDs, err := encodeMetadataIDs(ids)
-	if err != nil {
-		return &PlexError{Op: "MergeItems", Err: err}
-	}
 	mergeIDs, err := ParseCSVList(ids)
 	if err != nil {
 		return &PlexError{Op: "MergeItems", Err: err}
 	}
-	_, err = c.sdk.Library.MergeItems(ctx, operations.MergeItemsRequest{
-		IdsPathParameter:  encodedIDs,
-		IdsQueryParameter: mergeIDs,
+	return c.runMetadataSDKAction(ctx, "MergeItems", ids, func(ctx context.Context, encodedIDs string) error {
+		_, err := c.sdk.Library.MergeItems(ctx, operations.MergeItemsRequest{
+			IdsPathParameter:  encodedIDs,
+			IdsQueryParameter: mergeIDs,
+		})
+		return err
 	})
-	return c.wrapSDKError("MergeItems", encodedIDs, err)
 }
 
 func (c *Client) DetectMetadataAds(ctx context.Context, ids string) error {
@@ -585,8 +581,10 @@ func (c *Client) DeleteSectionIntros(ctx context.Context, sectionID string) erro
 	if err != nil {
 		return &PlexError{Op: "DeleteIntros", Section: sectionID, Err: fmt.Errorf("section ID must be numeric: %w", err)}
 	}
-	_, err = c.sdk.Library.DeleteIntros(ctx, operations.DeleteIntrosRequest{SectionID: parsedSectionID})
-	return c.wrapSDKError("DeleteIntros", sectionID, err)
+	return c.runSDKAction(ctx, "DeleteIntros", sectionID, func(ctx context.Context) error {
+		_, err := c.sdk.Library.DeleteIntros(ctx, operations.DeleteIntrosRequest{SectionID: parsedSectionID})
+		return err
+	})
 }
 
 func (c *Client) DeleteStreamByID(ctx context.Context, streamID int64, ext string) error {
@@ -606,10 +604,16 @@ func (c *Client) DeleteStreamByID(ctx context.Context, streamID int64, ext strin
 
 func (c *Client) SetStreamOffsetByID(ctx context.Context, streamID int64, ext string, offset int64) error {
 	offsetValue := offset
-	_, err := c.sdk.Library.SetStreamOffset(ctx, operations.SetStreamOffsetRequest{
-		StreamID: streamID,
-		Ext:      ext,
-		Offset:   &offsetValue,
+	err := c.executeWithRetry(ctx, "SetStreamOffset", func() error {
+		_, sdkErr := c.sdk.Library.SetStreamOffset(ctx, operations.SetStreamOffsetRequest{
+			StreamID: streamID,
+			Ext:      ext,
+			Offset:   &offsetValue,
+		})
+		if isAcceptedSDKResponse(sdkErr) {
+			return nil
+		}
+		return sdkErr
 	})
 	if err == nil {
 		return nil
@@ -655,12 +659,10 @@ func (c *Client) EditMarkerDynamic(ctx context.Context, ids, marker string, mark
 }
 
 func (c *Client) DeleteMarkerByID(ctx context.Context, ids, marker string) error {
-	encodedIDs, err := encodeMetadataIDs(ids)
-	if err != nil {
-		return &PlexError{Op: "DeleteMarker", Err: err}
-	}
-	_, err = c.sdk.Library.DeleteMarker(ctx, operations.DeleteMarkerRequest{Ids: encodedIDs, Marker: marker})
-	return c.wrapSDKError("DeleteMarker", marker, err)
+	return c.runMetadataSDKAction(ctx, "DeleteMarker", ids, func(ctx context.Context, encodedIDs string) error {
+		_, err := c.sdk.Library.DeleteMarker(ctx, operations.DeleteMarkerRequest{Ids: encodedIDs, Marker: marker})
+		return err
+	})
 }
 
 func (c *Client) libraryRequest(ctx context.Context, op, method, path string, query url.Values, accept string) ([]byte, error) {
@@ -764,11 +766,20 @@ func (c *Client) runMetadataSDKAction(ctx context.Context, op, ids string, fn fu
 	if err != nil {
 		return &PlexError{Op: op, Err: err}
 	}
-	err = fn(ctx, encodedIDs)
-	if isAcceptedSDKResponse(err) {
-		return nil
-	}
-	return c.wrapSDKError(op, encodedIDs, err)
+	return c.runSDKAction(ctx, op, encodedIDs, func(ctx context.Context) error {
+		return fn(ctx, encodedIDs)
+	})
+}
+
+func (c *Client) runSDKAction(ctx context.Context, op, section string, fn func(context.Context) error) error {
+	err := c.executeWithRetry(ctx, op, func() error {
+		sdkErr := fn(ctx)
+		if isAcceptedSDKResponse(sdkErr) {
+			return nil
+		}
+		return sdkErr
+	})
+	return c.wrapSDKError(op, section, err)
 }
 
 func (c *Client) wrapSDKError(op, section string, err error) error {

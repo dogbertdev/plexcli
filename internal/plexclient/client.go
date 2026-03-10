@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -18,7 +19,6 @@ import (
 
 	"github.com/LukeHagar/plexgo"
 	"github.com/LukeHagar/plexgo/models/components"
-	plexretry "github.com/LukeHagar/plexgo/retry"
 
 	"github.com/dogbertdev/plexcli/internal/cache"
 )
@@ -117,42 +117,10 @@ func NewClient(serverURL, token string, opts ...ClientOption) (*Client, error) {
 		plexgo.WithAccepts(components.AcceptsApplicationJSON),
 		plexgo.WithClient(client.httpClient),
 	}
-	if retryConfig := sdkRetryConfig(client.maxRetries); retryConfig != nil {
-		sdkOpts = append(sdkOpts, plexgo.WithRetryConfig(*retryConfig))
-	}
 
 	client.sdk = plexgo.New(sdkOpts...)
 
 	return client, nil
-}
-
-func sdkRetryConfig(maxRetries int) *plexretry.Config {
-	if maxRetries <= 0 {
-		return nil
-	}
-
-	var maxElapsed time.Duration
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		backoff := time.Duration(math.Pow(RetryExponent, float64(attempt))) * time.Second
-		if backoff > MaxBackoffDuration {
-			backoff = MaxBackoffDuration
-		}
-		maxElapsed += backoff
-	}
-
-	// Give the final retry attempt a small budget after the last sleep.
-	maxElapsed += time.Second
-
-	return &plexretry.Config{
-		Strategy: "backoff",
-		Backoff: &plexretry.BackoffStrategy{
-			InitialInterval: int(time.Second / time.Millisecond),
-			MaxInterval:     int(MaxBackoffDuration / time.Millisecond),
-			Exponent:        RetryExponent,
-			MaxElapsedTime:  int(maxElapsed / time.Millisecond),
-		},
-		RetryConnectionErrors: true,
-	}
 }
 
 // PlexError provides structured error information for Plex API operations.
@@ -177,10 +145,14 @@ func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if _, ok := err.(interface{ Temporary() bool }); ok {
+
+	var temporaryErr interface{ Temporary() bool }
+	if errors.As(err, &temporaryErr) && temporaryErr.Temporary() {
 		return true
 	}
-	if _, ok := err.(interface{ Timeout() bool }); ok {
+
+	var timeoutErr interface{ Timeout() bool }
+	if errors.As(err, &timeoutErr) && timeoutErr.Timeout() {
 		return true
 	}
 	return false
