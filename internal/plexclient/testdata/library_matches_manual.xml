@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MediaContainer size="5" identifier="com.plexapp.plugins.library" mediaTagPrefix="/system/bundle/media/flags/" mediaTagVersion="1772946566">
+<SearchResult thumb="https://images.plex.tv/photo?height=336&amp;width=225&amp;minSize=1&amp;upscale=1&amp;url=https%3A%2F%2Fmetadata-static%2Eplex%2Etv%2F5%2Fgracenote%2F592ac9c0abdb44c830aa5d6370c3216b%2Ejpg" type="movie" guid="plex://movie/5d77682454c0f0001f301a42" name="Akira" year="1988" summary="A secret military project endangers Neo-Tokyo when it turns a teenage biker gang member into a rampaging psychic psychopath who can only be stopped by his best friend." lifespanEnded="0">
+</SearchResult>
+<SearchResult thumb="https://images.plex.tv/photo?height=336&amp;width=225&amp;minSize=1&amp;upscale=1&amp;url=https%3A%2F%2Fimage%2Etmdb%2Eorg%2Ft%2Fp%2Foriginal%2Fh747fnqQjquGw1No7hE4XH4bfEL%2Ejpg" type="movie" guid="plex://movie/5d7770babbb697001f653247" name="Akira: Production Report" year="1988" summary="A documentary on the making of the Japanese animated science fiction film, Akira, created by Katsuhiro Otomo from his popular graphic novel series of the same title; shows Japanese animators at work and discusses their state-of-the-art animation techniques." lifespanEnded="0">
+</SearchResult>
+<SearchResult thumb="https://images.plex.tv/photo?height=336&amp;width=225&amp;minSize=1&amp;upscale=1&amp;url=https%3A%2F%2Fimage%2Etmdb%2Eorg%2Ft%2Fp%2Foriginal%2FhhSXyyDc9gSriQq9BhyAiyRNww8%2Ejpg" type="movie" guid="plex://movie/608ecd92b2f454002d1c7157" name="Akira-kankan" year="1989" summary="A sunny day with little sister, 8mm unfinished film by Toshihiko Omote." lifespanEnded="0">
+</SearchResult>
+<SearchResult type="movie" guid="plex://movie/5f40bf27ce2564003fa64a60" name="Akira Sound Clip" summary="A behind the scenes look at the music behind the classic 1988 film Akira." lifespanEnded="0">
+</SearchResult>
+<SearchResult type="movie" guid="plex://movie/5f40a1c7c63b480040efe281" name="Akira Kurosawa Making &#39;Rhapsody in August&#39;" lifespanEnded="0">
+</SearchResult>
+</MediaContainer>
