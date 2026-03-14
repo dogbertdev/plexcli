@@ -161,6 +161,15 @@ plex library media stream get 77 srt --output /tmp/subtitle.srt
 # Attach subtitles from a URL or local file
 plex library subtitle add 12345 --url https://example.com/subs/en.srt --language eng
 plex library subtitle add 12345 --file ./subs/en.srt --language eng --format srt
+
+# Show similar items for a movie/show
+plex library discover similar 12345 --compact
+
+# Show related items as JSON
+plex library discover related 12345 --json
+
+# Show Plex metadata matches for an item
+plex library discover matches 12345 --compact
 ```
 
 #### Authenticate
@@ -239,6 +248,48 @@ plex duplicates
 
 # Find duplicates in a specific section
 plex duplicates --section 1
+```
+
+#### Search the Library
+
+```bash
+# Fuzzy search
+plex search "Ghost in the Shell"
+
+# Exact title + year resolution
+plex search "Gattaca" --exact --year 1997
+
+# Return only the top surviving result
+plex search "Moon" --exact --first
+
+# Fail for scripting if the result is ambiguous
+plex search "Ghost in the Shell" --exact --fail-ambiguous
+```
+
+#### Build Playlists
+
+```bash
+# Create a playlist from rating keys
+plex playlist create "Sci-Fi Night" 123 456
+
+# Create a playlist by resolving titles directly
+plex playlist create "Sci-Fi Night" --query "Solaris" --query "On the Silver Globe"
+
+# Add more items by title
+plex playlist add 999 --query "Perfect Blue"
+
+# Create a smart playlist with multiple filters
+plex playlist smart "Oshii Essentials" --section 1 --director "Mamoru Oshii" --genre Anime --year-from 1985 --year-to 2004 --unwatched
+```
+
+#### Recommend from Seeds
+
+```bash
+# Build ranked recommendations from multiple seeds
+plex recommend --like "Avalon" --like "Stalker"
+
+# Restrict to one library section and save as a playlist
+plex recommend --section 1 --like "Avalon" --like "Stalker" --playlist-name "Avalon x Stalker"
 ```
 
 #### Check File Paths
