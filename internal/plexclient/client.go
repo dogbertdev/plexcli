@@ -12,10 +12,12 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/LukeHagar/plexgo"
 	"github.com/LukeHagar/plexgo/models/components"
@@ -36,6 +38,8 @@ const (
 	DefaultLibraryPathPrefix = "/library/sections/"
 	DefaultLibraryCacheTTL   = 5 * time.Minute
 )
+
+var ErrMetadataNotFound = errors.New("metadata not found")
 
 // Library represents a Plex library section.
 type Library struct {
@@ -196,23 +200,30 @@ func (c *Client) executeWithRetry(ctx context.Context, op string, fn func() erro
 }
 
 type rawMediaMetadata struct {
-	RatingKey string  `json:"ratingKey"`
-	Key       string  `json:"key"`
-	Title     string  `json:"title"`
-	Type      string  `json:"type"`
-	GUID      *string `json:"guid"`
-	Guid      []struct {
+	RatingKey           string  `json:"ratingKey"`
+	Key                 string  `json:"key"`
+	Title               string  `json:"title"`
+	Type                string  `json:"type"`
+	GUID                *string `json:"guid"`
+	LibrarySectionID    *int    `json:"librarySectionID"`
+	LibrarySectionTitle *string `json:"librarySectionTitle"`
+	Guid                []struct {
 		ID string `json:"id"`
 	} `json:"Guid"`
-	Year             *int    `json:"year"`
-	AddedAt          int64   `json:"addedAt"`
-	ViewCount        *int    `json:"viewCount"`
-	GrandparentTitle *string `json:"grandparentTitle"`
-	EditionTitle     *string `json:"editionTitle"`
-	Director         []struct {
-		Tag string `json:"tag"`
-	} `json:"Director"`
-	Media []struct {
+	Year             *int          `json:"year"`
+	AddedAt          int64         `json:"addedAt"`
+	ViewCount        *int          `json:"viewCount"`
+	GrandparentTitle *string       `json:"grandparentTitle"`
+	ParentTitle      *string       `json:"parentTitle"`
+	ParentIndex      *int          `json:"parentIndex"`
+	Index            *int          `json:"index"`
+	EditionTitle     *string       `json:"editionTitle"`
+	Director         []rawNamedTag `json:"Director"`
+	Genre            []rawNamedTag `json:"Genre"`
+	Country          []rawNamedTag `json:"Country"`
+	Collection       []rawNamedTag `json:"Collection"`
+	Studio           *string       `json:"studio"`
+	Media            []struct {
 		Part []struct {
 			File   *string `json:"file"`
 			Size   *int64  `json:"size"`
@@ -236,6 +247,9 @@ type rawMediaMetadata struct {
 type rawLibraryItemsResponse struct {
 	MediaContainer struct {
 		Metadata []rawMediaMetadata `json:"Metadata"`
+		Hub      []struct {
+			Metadata []rawMediaMetadata `json:"Metadata"`
+		} `json:"Hub"`
 	} `json:"MediaContainer"`
 }
 
@@ -367,9 +381,10 @@ func (c *Client) GetItemMetadata(ctx context.Context, ratingKey string) (*compon
 			return fmt.Errorf("failed to unmarshal response: %w", err)
 		}
 
-		if len(rawResp.MediaContainer.Metadata) > 0 {
-			result = convertRawToMetadata(rawResp.MediaContainer.Metadata[0])
+		if len(rawResp.MediaContainer.Metadata) == 0 {
+			return fmt.Errorf("%w for rating key %s", ErrMetadataNotFound, ratingKey)
 		}
+		result = convertRawToMetadata(rawResp.MediaContainer.Metadata[0])
 
 		return nil
 	})
@@ -399,12 +414,47 @@ func convertRawToMetadata(raw rawMediaMetadata) *components.Metadata {
 		Summary:          raw.Summary,
 		Thumb:            raw.Thumb,
 		GrandparentTitle: raw.GrandparentTitle,
+		ParentTitle:      raw.ParentTitle,
+		ParentIndex:      raw.ParentIndex,
+		Index:            raw.Index,
+	}
+
+	if len(raw.Country) > 0 {
+		meta.Country = rawTagsToComponents(raw.Country)
+	}
+	if len(raw.Director) > 0 {
+		meta.Director = rawTagsToComponents(raw.Director)
+	}
+	if len(raw.Genre) > 0 {
+		meta.Genre = rawTagsToComponents(raw.Genre)
+	}
+	if raw.Studio != nil {
+		meta.Studio = raw.Studio
+	}
+	if len(raw.Collection) > 0 {
+		if meta.AdditionalProperties == nil {
+			meta.AdditionalProperties = map[string]any{}
+		}
+		meta.AdditionalProperties["collections"] = extractRawTagNames(raw.Collection)
 	}
 
 	if raw.EditionTitle != nil {
-		meta.AdditionalProperties = map[string]any{
-			"editionTitle": *raw.EditionTitle,
+		if meta.AdditionalProperties == nil {
+			meta.AdditionalProperties = map[string]any{}
 		}
+		meta.AdditionalProperties["editionTitle"] = *raw.EditionTitle
+	}
+	if raw.LibrarySectionID != nil {
+		if meta.AdditionalProperties == nil {
+			meta.AdditionalProperties = map[string]any{}
+		}
+		meta.AdditionalProperties["librarySectionID"] = *raw.LibrarySectionID
+	}
+	if raw.LibrarySectionTitle != nil && strings.TrimSpace(*raw.LibrarySectionTitle) != "" {
+		if meta.AdditionalProperties == nil {
+			meta.AdditionalProperties = map[string]any{}
+		}
+		meta.AdditionalProperties["librarySectionTitle"] = *raw.LibrarySectionTitle
 	}
 	if raw.GUID != nil {
 		meta.GUID = raw.GUID
@@ -469,6 +519,230 @@ func stringValueOrEmpty(v *string) string {
 		return ""
 	}
 	return *v
+}
+
+func SearchResultFromMetadata(item *components.Metadata) SearchResult {
+	if item == nil {
+		return SearchResult{}
+	}
+
+	result := SearchResult{
+		Title:            anyToStringMetadata(item.Title),
+		Type:             anyToStringMetadata(item.Type),
+		GrandparentTitle: item.GrandparentTitle,
+		Thumb:            stringPtrFromAny(item.Thumb),
+		Genres:           componentTagNames(item.Genre),
+		Countries:        componentTagNames(item.Country),
+	}
+
+	if item.RatingKey != nil {
+		result.RatingKey = anyToStringMetadata(item.RatingKey)
+	}
+	result.Key = anyToStringMetadata(item.Key)
+
+	if item.Year != nil {
+		year := int(*item.Year)
+		result.Year = &year
+	}
+	if item.ParentTitle != nil {
+		result.ParentTitle = item.ParentTitle
+	}
+	if item.ParentIndex != nil {
+		parentIndex := int(*item.ParentIndex)
+		result.ParentIndex = &parentIndex
+	}
+	if item.Index != nil {
+		index := int(*item.Index)
+		result.Index = &index
+	}
+	if item.GUID != nil && strings.TrimSpace(*item.GUID) != "" {
+		result.GUID = item.GUID
+	} else if guid := firstGUID(item.Guids); guid != "" {
+		result.GUID = &guid
+	}
+	if item.AdditionalProperties != nil {
+		if sectionID, ok := intFromAny(item.AdditionalProperties["librarySectionID"]); ok {
+			result.LibrarySectionID = &sectionID
+		}
+		if sectionTitle := stringValue(item.AdditionalProperties["librarySectionTitle"]); sectionTitle != "" {
+			result.LibrarySectionTitle = &sectionTitle
+		}
+		if collections := stringSliceFromAny(item.AdditionalProperties["collections"]); len(collections) > 0 {
+			result.Collections = collections
+		}
+	}
+	if studio := strings.TrimSpace(anyToStringMetadata(item.Studio)); studio != "" {
+		result.Studio = &studio
+	}
+
+	return result
+}
+
+func intFromAny(v any) (int, bool) {
+	switch value := v.(type) {
+	case int:
+		return value, true
+	case int32:
+		return int(value), true
+	case int64:
+		return int(value), true
+	case float64:
+		return int(value), true
+	case float32:
+		return int(value), true
+	case string:
+		if strings.TrimSpace(value) == "" {
+			return 0, false
+		}
+		i, err := strconv.Atoi(value)
+		if err != nil {
+			return 0, false
+		}
+		return i, true
+	case *int:
+		if value == nil {
+			return 0, false
+		}
+		return *value, true
+	default:
+		return 0, false
+	}
+}
+
+func stringValue(v any) string {
+	switch value := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(value)
+	case *string:
+		if value == nil {
+			return ""
+		}
+		return strings.TrimSpace(*value)
+	default:
+		return strings.TrimSpace(fmt.Sprintf("%v", value))
+	}
+}
+
+func stringSliceFromAny(v any) []string {
+	switch value := v.(type) {
+	case nil:
+		return nil
+	case []string:
+		items := make([]string, 0, len(value))
+		for _, item := range value {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				items = append(items, trimmed)
+			}
+		}
+		return items
+	case []any:
+		items := make([]string, 0, len(value))
+		for _, item := range value {
+			if str := stringValue(item); str != "" {
+				items = append(items, str)
+			}
+		}
+		return items
+	default:
+		return nil
+	}
+}
+
+func anyToStringMetadata(v any) string {
+	switch value := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return value
+	case *string:
+		if value == nil {
+			return ""
+		}
+		return *value
+	default:
+		return fmt.Sprintf("%v", value)
+	}
+}
+
+func stringPtrFromAny(v any) *string {
+	switch value := v.(type) {
+	case nil:
+		return nil
+	case string:
+		if strings.TrimSpace(value) == "" {
+			return nil
+		}
+		out := value
+		return &out
+	case *string:
+		if value == nil || strings.TrimSpace(*value) == "" {
+			return nil
+		}
+		return value
+	default:
+		str := fmt.Sprintf("%v", value)
+		if strings.TrimSpace(str) == "" {
+			return nil
+		}
+		return &str
+	}
+}
+
+func rawTagsToComponents(rawTags []rawNamedTag) []components.Tag {
+	tags := make([]components.Tag, 0, len(rawTags))
+	for _, rawTag := range rawTags {
+		tag := rawTag.Tag
+		if strings.TrimSpace(tag) == "" {
+			continue
+		}
+		tags = append(tags, components.Tag{Tag: tag})
+	}
+	return tags
+}
+
+func componentTagNames(tags []components.Tag) []string {
+	names := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		name := strings.TrimSpace(anyToStringMetadata(tag.Tag))
+		if name == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+func firstGUID(guids []components.Guids) string {
+	for _, guid := range guids {
+		if strings.TrimSpace(guid.ID) != "" {
+			return guid.ID
+		}
+	}
+	return ""
+}
+
+func firstRawGUID(guids []struct {
+	ID string `json:"id"`
+}) string {
+	for _, guid := range guids {
+		if strings.TrimSpace(guid.ID) != "" {
+			return guid.ID
+		}
+	}
+	return ""
+}
+
+func extractRawTagNames(rawTags []rawNamedTag) []string {
+	names := make([]string, 0, len(rawTags))
+	for _, rawTag := range rawTags {
+		if strings.TrimSpace(rawTag.Tag) == "" {
+			continue
+		}
+		names = append(names, rawTag.Tag)
+	}
+	return names
 }
 
 func (c *Client) GetLibraryItemsConcurrent(ctx context.Context, sectionIDs []string, maxConcurrent int) ([]*components.Metadata, error) {
@@ -871,16 +1145,23 @@ func (c *Client) GetMaxRetries() int {
 
 // SearchResult represents a single search result item
 type SearchResult struct {
-	RatingKey        string  `json:"ratingKey"`
-	Key              string  `json:"key"`
-	Title            string  `json:"title"`
-	Type             string  `json:"type"`
-	Year             *int    `json:"year"`
-	GrandparentTitle *string `json:"grandparentTitle"`
-	ParentTitle      *string `json:"parentTitle"`
-	ParentIndex      *int    `json:"parentIndex"`
-	Index            *int    `json:"index"`
-	Thumb            *string `json:"thumb"`
+	RatingKey           string   `json:"ratingKey"`
+	Key                 string   `json:"key"`
+	Title               string   `json:"title"`
+	Type                string   `json:"type"`
+	Year                *int     `json:"year"`
+	GrandparentTitle    *string  `json:"grandparentTitle"`
+	ParentTitle         *string  `json:"parentTitle"`
+	ParentIndex         *int     `json:"parentIndex"`
+	Index               *int     `json:"index"`
+	Thumb               *string  `json:"thumb"`
+	GUID                *string  `json:"guid,omitempty"`
+	LibrarySectionID    *int     `json:"librarySectionID,omitempty"`
+	LibrarySectionTitle *string  `json:"librarySectionTitle,omitempty"`
+	Genres              []string `json:"genres,omitempty"`
+	Countries           []string `json:"countries,omitempty"`
+	Collections         []string `json:"collections,omitempty"`
+	Studio              *string  `json:"studio,omitempty"`
 }
 
 type rawSearchHub struct {
@@ -889,17 +1170,28 @@ type rawSearchHub struct {
 	Title    string `json:"title"`
 	Size     int    `json:"size"`
 	Metadata []struct {
-		RatingKey        string  `json:"ratingKey"`
-		Key              string  `json:"key"`
-		Title            string  `json:"title"`
-		Type             string  `json:"type"`
-		Year             *int    `json:"year"`
-		GrandparentTitle *string `json:"grandparentTitle"`
-		ParentTitle      *string `json:"parentTitle"`
-		ParentIndex      *int    `json:"parentIndex"`
-		Index            *int    `json:"index"`
-		Thumb            *string `json:"thumb"`
+		RatingKey           string        `json:"ratingKey"`
+		Key                 string        `json:"key"`
+		Title               string        `json:"title"`
+		Type                string        `json:"type"`
+		Year                *int          `json:"year"`
+		GrandparentTitle    *string       `json:"grandparentTitle"`
+		ParentTitle         *string       `json:"parentTitle"`
+		ParentIndex         *int          `json:"parentIndex"`
+		Index               *int          `json:"index"`
+		Thumb               *string       `json:"thumb"`
+		GUID                *string       `json:"guid"`
+		LibrarySectionID    *int          `json:"librarySectionID"`
+		LibrarySectionTitle *string       `json:"librarySectionTitle"`
+		Genre               []rawNamedTag `json:"Genre"`
+		Country             []rawNamedTag `json:"Country"`
+		Collection          []rawNamedTag `json:"Collection"`
+		Studio              *string       `json:"studio"`
 	} `json:"Metadata"`
+}
+
+type rawNamedTag struct {
+	Tag string `json:"tag"`
 }
 
 type rawSearchResponse struct {
@@ -924,6 +1216,9 @@ func (c *Client) SearchLibrary(ctx context.Context, query string, sectionID *str
 	var results []SearchResult
 
 	err := c.executeWithRetry(ctx, "SearchLibrary", func() error {
+		results = results[:0]
+		indexByKey := make(map[string][]int)
+
 		urlStr := fmt.Sprintf("%s/hubs/search?query=%s&limit=%d&X-Plex-Token=%s",
 			c.serverURL, url.QueryEscape(query), limit, c.token)
 		if sectionID != nil && *sectionID != "" {
@@ -959,17 +1254,24 @@ func (c *Client) SearchLibrary(ctx context.Context, query string, sectionID *str
 
 		for _, hub := range rawResp.MediaContainer.Hub {
 			for _, item := range hub.Metadata {
-				results = append(results, SearchResult{
-					RatingKey:        item.RatingKey,
-					Key:              item.Key,
-					Title:            item.Title,
-					Type:             item.Type,
-					Year:             item.Year,
-					GrandparentTitle: item.GrandparentTitle,
-					ParentTitle:      item.ParentTitle,
-					ParentIndex:      item.ParentIndex,
-					Index:            item.Index,
-					Thumb:            item.Thumb,
+				results = appendUniqueSearchLibraryResult(results, indexByKey, SearchResult{
+					RatingKey:           item.RatingKey,
+					Key:                 item.Key,
+					Title:               item.Title,
+					Type:                item.Type,
+					Year:                item.Year,
+					GrandparentTitle:    item.GrandparentTitle,
+					ParentTitle:         item.ParentTitle,
+					ParentIndex:         item.ParentIndex,
+					Index:               item.Index,
+					Thumb:               item.Thumb,
+					GUID:                item.GUID,
+					LibrarySectionID:    item.LibrarySectionID,
+					LibrarySectionTitle: item.LibrarySectionTitle,
+					Genres:              extractRawTagNames(item.Genre),
+					Countries:           extractRawTagNames(item.Country),
+					Collections:         extractRawTagNames(item.Collection),
+					Studio:              item.Studio,
 				})
 			}
 		}
@@ -985,6 +1287,442 @@ func (c *Client) SearchLibrary(ctx context.Context, query string, sectionID *str
 	}
 
 	return results, nil
+}
+
+func appendUniqueSearchLibraryResult(
+	results []SearchResult,
+	indexByKey map[string][]int,
+	item SearchResult,
+) []SearchResult {
+	keys := searchResultKeys(item)
+	for _, key := range keys {
+		for _, index := range indexByKey[key] {
+			if !searchResultsCanMerge(results[index], item) {
+				continue
+			}
+			results[index] = mergeDiscoveryResult(results[index], item)
+			registerSearchResultKeys(indexByKey, results[index], index)
+			return results
+		}
+	}
+
+	index := len(results)
+	registerSearchResultKeys(indexByKey, item, index)
+	return append(results, item)
+}
+
+func searchResultKeys(item SearchResult) []string {
+	keys := make([]string, 0, 4)
+	if item.GUID != nil && strings.TrimSpace(*item.GUID) != "" {
+		keys = append(keys, "guid:"+strings.TrimSpace(*item.GUID))
+	}
+	if strings.TrimSpace(item.RatingKey) != "" {
+		keys = append(keys, "rating_key:"+strings.TrimSpace(item.RatingKey))
+	}
+	if strings.TrimSpace(item.Key) != "" {
+		keys = append(keys, "key:"+strings.TrimSpace(item.Key))
+	}
+	return append(keys, searchResultFallbackKey(item))
+}
+
+func searchResultFallbackKey(item SearchResult) string {
+	return fmt.Sprintf(
+		"fallback:%s|%d|%s|%s|%s|%d|%d",
+		normalizeDiscoveryText(item.Title),
+		discoveryYearValue(item.Year),
+		normalizeDiscoveryText(item.Type),
+		normalizeDiscoveryText(optionalStringValue(item.GrandparentTitle)),
+		normalizeDiscoveryText(optionalStringValue(item.ParentTitle)),
+		discoveryIndexValue(item.ParentIndex),
+		discoveryIndexValue(item.Index),
+	)
+}
+
+func registerSearchResultKeys(indexByKey map[string][]int, item SearchResult, index int) {
+	for _, key := range searchResultKeys(item) {
+		indexByKey[key] = appendUniqueSearchResultIndex(indexByKey[key], index)
+	}
+}
+
+func appendUniqueSearchResultIndex(indexes []int, index int) []int {
+	for _, existing := range indexes {
+		if existing == index {
+			return indexes
+		}
+	}
+	return append(indexes, index)
+}
+
+func searchResultsCanMerge(base SearchResult, overlay SearchResult) bool {
+	if base.LibrarySectionID != nil && overlay.LibrarySectionID != nil && *base.LibrarySectionID != *overlay.LibrarySectionID {
+		return false
+	}
+	if searchResultsShareRatingKey(base, overlay) || searchResultsShareKey(base, overlay) {
+		return true
+	}
+	if searchResultsShareGUID(base, overlay) {
+		return base.LibrarySectionID == nil && overlay.LibrarySectionID == nil ||
+			base.LibrarySectionID != nil && overlay.LibrarySectionID != nil && *base.LibrarySectionID == *overlay.LibrarySectionID
+	}
+	if searchResultsHaveConflictingIdentifiers(base, overlay) {
+		return false
+	}
+	if searchResultFallbackKey(base) != searchResultFallbackKey(overlay) {
+		return false
+	}
+	return searchResultsHaveComplementaryIdentifiers(base, overlay)
+}
+
+func searchResultsHaveConflictingIdentifiers(base SearchResult, overlay SearchResult) bool {
+	return searchResultsConflict(optionalStringValue(base.GUID), optionalStringValue(overlay.GUID)) ||
+		searchResultsConflict(base.RatingKey, overlay.RatingKey) ||
+		searchResultsConflict(base.Key, overlay.Key)
+}
+
+func searchResultsConflict(base string, overlay string) bool {
+	base = strings.TrimSpace(base)
+	overlay = strings.TrimSpace(overlay)
+	return base != "" && overlay != "" && base != overlay
+}
+
+func searchResultsShareGUID(base SearchResult, overlay SearchResult) bool {
+	baseGUID := strings.TrimSpace(optionalStringValue(base.GUID))
+	overlayGUID := strings.TrimSpace(optionalStringValue(overlay.GUID))
+	return baseGUID != "" && baseGUID == overlayGUID
+}
+
+func searchResultsShareRatingKey(base SearchResult, overlay SearchResult) bool {
+	baseRatingKey := strings.TrimSpace(base.RatingKey)
+	overlayRatingKey := strings.TrimSpace(overlay.RatingKey)
+	return baseRatingKey != "" && baseRatingKey == overlayRatingKey
+}
+
+func searchResultsShareKey(base SearchResult, overlay SearchResult) bool {
+	baseKey := strings.TrimSpace(base.Key)
+	overlayKey := strings.TrimSpace(overlay.Key)
+	return baseKey != "" && baseKey == overlayKey
+}
+
+func searchResultsHaveComplementaryIdentifiers(base SearchResult, overlay SearchResult) bool {
+	return searchResultHasGUID(base) != searchResultHasGUID(overlay) &&
+		searchResultHasLocalIdentifier(base) != searchResultHasLocalIdentifier(overlay)
+}
+
+func searchResultHasGUID(item SearchResult) bool {
+	return strings.TrimSpace(optionalStringValue(item.GUID)) != ""
+}
+
+func searchResultHasLocalIdentifier(item SearchResult) bool {
+	return strings.TrimSpace(item.RatingKey) != "" || strings.TrimSpace(item.Key) != ""
+}
+
+func optionalStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+type LibraryTagInfo struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Count int    `json:"count,omitempty"`
+}
+
+type SmartPlaylistFilters struct {
+	Directors   []string
+	Genres      []string
+	Countries   []string
+	Collections []string
+	Studios     []string
+	YearFrom    int
+	YearTo      int
+	Unwatched   bool
+}
+
+func (c *Client) GetMetadataSearchResult(ctx context.Context, ratingKey string) (SearchResult, error) {
+	item, err := c.GetItemMetadata(ctx, ratingKey)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	if item == nil {
+		return SearchResult{}, &PlexError{
+			Op:  "GetMetadataSearchResult",
+			Err: fmt.Errorf("%w for rating key %s", ErrMetadataNotFound, ratingKey),
+		}
+	}
+	result := SearchResultFromMetadata(item)
+	if result.RatingKey == "" {
+		result.RatingKey = ratingKey
+	}
+	return result, nil
+}
+
+func (c *Client) GetRelatedItems(ctx context.Context, ids string) ([]SearchResult, error) {
+	return c.getMetadataDiscoveryItems(ctx, "GetRelatedItems", http.MethodGet, fmt.Sprintf("library/metadata/%s/related", ids), nil)
+}
+
+func (c *Client) ListSimilar(ctx context.Context, ids string, count int) ([]SearchResult, error) {
+	params := url.Values{}
+	if count > 0 {
+		params.Set("count", strconv.Itoa(count))
+	}
+	return c.getMetadataDiscoveryItems(ctx, "ListSimilar", http.MethodGet, fmt.Sprintf("library/metadata/%s/similar", ids), params)
+}
+
+func (c *Client) getMetadataDiscoveryItems(ctx context.Context, op string, method string, path string, params url.Values) ([]SearchResult, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, &PlexError{
+			Op:  op,
+			Err: fmt.Errorf("path is required"),
+		}
+	}
+
+	var items []SearchResult
+	err := c.executeWithRetry(ctx, op, func() error {
+		urlStr := fmt.Sprintf("%s/%s", strings.TrimRight(c.serverURL, "/"), strings.TrimLeft(path, "/"))
+		if params == nil {
+			params = url.Values{}
+		}
+		params.Set("X-Plex-Token", c.token)
+		if encoded := params.Encode(); encoded != "" {
+			urlStr += "?" + encoded
+		}
+
+		req, err := http.NewRequestWithContext(ctx, method, urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		var rawResp rawLibraryItemsResponse
+		if err := json.Unmarshal(body, &rawResp); err != nil {
+			return fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+
+		items = flattenDiscoveryItems(rawResp)
+
+		return nil
+	})
+	if err != nil {
+		return nil, &PlexError{
+			Op:  op,
+			Err: err,
+		}
+	}
+	return items, nil
+}
+
+func (c *Client) GetLibraryTags(ctx context.Context, sectionID string, tagType string) ([]LibraryTagInfo, error) {
+	if sectionID == "" {
+		return nil, &PlexError{
+			Op:  "GetLibraryTags",
+			Err: fmt.Errorf("section ID is required"),
+		}
+	}
+	if tagType == "" {
+		return nil, &PlexError{
+			Op:  "GetLibraryTags",
+			Err: fmt.Errorf("tag type is required"),
+		}
+	}
+
+	var tags []LibraryTagInfo
+	err := c.executeWithRetry(ctx, "GetLibraryTags", func() error {
+		urlStr := fmt.Sprintf("%s/library/sections/%s/%s?X-Plex-Token=%s",
+			c.serverURL, sectionID, url.PathEscape(tagType), c.token)
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		var rawResp struct {
+			MediaContainer struct {
+				Directory []struct {
+					Key   string `json:"key"`
+					Title string `json:"title"`
+					Count int    `json:"count"`
+				} `json:"Directory"`
+			} `json:"MediaContainer"`
+		}
+		if err := json.Unmarshal(body, &rawResp); err != nil {
+			return fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+
+		tags = make([]LibraryTagInfo, 0, len(rawResp.MediaContainer.Directory))
+		for _, dir := range rawResp.MediaContainer.Directory {
+			if strings.TrimSpace(dir.Key) == "" || strings.TrimSpace(dir.Title) == "" {
+				continue
+			}
+			tags = append(tags, LibraryTagInfo{ID: dir.Key, Name: dir.Title, Count: dir.Count})
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, &PlexError{
+			Op:      "GetLibraryTags",
+			Section: sectionID,
+			Err:     err,
+		}
+	}
+	return tags, nil
+}
+
+func flattenDiscoveryItems(rawResp rawLibraryItemsResponse) []SearchResult {
+	total := len(rawResp.MediaContainer.Metadata)
+	for _, hub := range rawResp.MediaContainer.Hub {
+		total += len(hub.Metadata)
+	}
+
+	items := make([]SearchResult, 0, total)
+	indexByKey := make(map[string][]int, total)
+	for _, item := range rawResp.MediaContainer.Metadata {
+		items = appendUniqueDiscoveryItem(items, indexByKey, rawSearchResultFromMetadata(item))
+	}
+	for _, hub := range rawResp.MediaContainer.Hub {
+		for _, item := range hub.Metadata {
+			items = appendUniqueDiscoveryItem(items, indexByKey, rawSearchResultFromMetadata(item))
+		}
+	}
+	return items
+}
+
+func appendUniqueDiscoveryItem(
+	items []SearchResult,
+	indexByKey map[string][]int,
+	item SearchResult,
+) []SearchResult {
+	keys := searchResultKeys(item)
+	for _, key := range keys {
+		for _, index := range indexByKey[key] {
+			if !searchResultsCanMerge(items[index], item) {
+				continue
+			}
+			items[index] = mergeDiscoveryResult(items[index], item)
+			registerSearchResultKeys(indexByKey, items[index], index)
+			return items
+		}
+	}
+
+	index := len(items)
+	registerSearchResultKeys(indexByKey, item, index)
+	return append(items, item)
+}
+
+func SearchResultLogicalKey(item SearchResult) string {
+	keys := searchResultKeys(item)
+	if len(keys) == 0 {
+		return ""
+	}
+	return keys[0]
+}
+
+func mergeDiscoveryResult(base SearchResult, overlay SearchResult) SearchResult {
+	if base.RatingKey == "" {
+		base.RatingKey = overlay.RatingKey
+	}
+	if base.Key == "" {
+		base.Key = overlay.Key
+	}
+	if base.Title == "" {
+		base.Title = overlay.Title
+	}
+	if base.Type == "" {
+		base.Type = overlay.Type
+	}
+	if base.Year == nil {
+		base.Year = overlay.Year
+	}
+	if base.GrandparentTitle == nil {
+		base.GrandparentTitle = overlay.GrandparentTitle
+	}
+	if base.ParentTitle == nil {
+		base.ParentTitle = overlay.ParentTitle
+	}
+	if base.ParentIndex == nil {
+		base.ParentIndex = overlay.ParentIndex
+	}
+	if base.Index == nil {
+		base.Index = overlay.Index
+	}
+	if base.Thumb == nil {
+		base.Thumb = overlay.Thumb
+	}
+	if base.GUID == nil {
+		base.GUID = overlay.GUID
+	}
+	if base.LibrarySectionID == nil {
+		base.LibrarySectionID = overlay.LibrarySectionID
+	}
+	if base.LibrarySectionTitle == nil {
+		base.LibrarySectionTitle = overlay.LibrarySectionTitle
+	}
+	if len(base.Genres) == 0 {
+		base.Genres = append([]string{}, overlay.Genres...)
+	}
+	if len(base.Countries) == 0 {
+		base.Countries = append([]string{}, overlay.Countries...)
+	}
+	if len(base.Collections) == 0 {
+		base.Collections = append([]string{}, overlay.Collections...)
+	}
+	if base.Studio == nil {
+		base.Studio = overlay.Studio
+	}
+	return base
+}
+
+func normalizeDiscoveryText(input string) string {
+	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(input))), " ")
+}
+
+func discoveryYearValue(year *int) int {
+	if year == nil {
+		return 0
+	}
+	return *year
+}
+
+func discoveryIndexValue(index *int) int {
+	if index == nil {
+		return 0
+	}
+	return *index
 }
 
 // PlaylistInfo represents a playlist
@@ -1218,24 +1956,57 @@ func (c *Client) CreatePlaylist(ctx context.Context, title string, playlistType 
 // sectionID is the library section, filterType is the filter category (e.g., "director"),
 // filterValue is the filter ID (e.g., director ID from GetDirectors)
 func (c *Client) CreateSmartPlaylist(ctx context.Context, title string, playlistType string, sectionID string, filterType string, filterValue string) (*PlaylistInfo, error) {
-	if title == "" {
+	filterValue = strings.TrimSpace(filterValue)
+	if filterValue == "" {
 		return nil, &PlexError{
 			Op:  "CreateSmartPlaylist",
+			Err: fmt.Errorf("filter value is required"),
+		}
+	}
+
+	filters := SmartPlaylistFilters{}
+	switch filterType {
+	case "director":
+		filters.Directors = []string{filterValue}
+	case "genre":
+		filters.Genres = []string{filterValue}
+	case "country":
+		filters.Countries = []string{filterValue}
+	case "collection":
+		filters.Collections = []string{filterValue}
+	case "studio":
+		filters.Studios = []string{filterValue}
+	default:
+		return nil, &PlexError{
+			Op:  "CreateSmartPlaylist",
+			Err: fmt.Errorf("unsupported filter type: %s", filterType),
+		}
+	}
+
+	return c.CreateSmartPlaylistWithFilters(ctx, title, playlistType, sectionID, filters)
+}
+
+func (c *Client) CreateSmartPlaylistWithFilters(ctx context.Context, title string, playlistType string, sectionID string, filters SmartPlaylistFilters) (*PlaylistInfo, error) {
+	if title == "" {
+		return nil, &PlexError{
+			Op:  "CreateSmartPlaylistWithFilters",
 			Err: fmt.Errorf("title is required"),
 		}
 	}
 
 	if sectionID == "" {
 		return nil, &PlexError{
-			Op:  "CreateSmartPlaylist",
+			Op:  "CreateSmartPlaylistWithFilters",
 			Err: fmt.Errorf("section ID is required"),
 		}
 	}
 
-	if filterType == "" || filterValue == "" {
+	var err error
+	filters, err = normalizeSmartPlaylistFilters(filters)
+	if err != nil {
 		return nil, &PlexError{
-			Op:  "CreateSmartPlaylist",
-			Err: fmt.Errorf("filter type and value are required"),
+			Op:  "CreateSmartPlaylistWithFilters",
+			Err: err,
 		}
 	}
 
@@ -1245,21 +2016,8 @@ func (c *Client) CreateSmartPlaylist(ctx context.Context, title string, playlist
 
 	var playlist *PlaylistInfo
 
-	err := c.executeWithRetry(ctx, "CreateSmartPlaylist", func() error {
-		// Smart playlist URI format (from working example):
-		// library://x/directory/%2Flibrary%2Fsections%2F1%2Fall%3Ftype%3D1%26sort%3DtitleSort%26director%3D2690
-		// Which decodes to: library://x/directory//library/sections/1/all?type=1&sort=titleSort&director=2690
-		mediaType := "1" // movies by default
-		if playlistType == "audio" {
-			mediaType = "10" // tracks
-		}
-
-		filterPath := fmt.Sprintf("/library/sections/%s/all?type=%s&sort=titleSort&%s=%s",
-			sectionID, mediaType, filterType, filterValue)
-
-		// URI format: library://x/directory/{url_encoded_path}
-		uri := fmt.Sprintf("library://x/directory/%s", url.QueryEscape(filterPath))
-
+	uri := buildSmartPlaylistURI(sectionID, playlistType, filters)
+	err = c.executeWithRetry(ctx, "CreateSmartPlaylistWithFilters", func() error {
 		urlStr := fmt.Sprintf("%s/playlists?title=%s&type=%s&smart=1&uri=%s&X-Plex-Token=%s",
 			c.serverURL, url.QueryEscape(title), playlistType, url.QueryEscape(uri), c.token)
 
@@ -1310,7 +2068,7 @@ func (c *Client) CreateSmartPlaylist(ctx context.Context, title string, playlist
 
 	if err != nil {
 		return nil, &PlexError{
-			Op:  "CreateSmartPlaylist",
+			Op:  "CreateSmartPlaylistWithFilters",
 			Err: err,
 		}
 	}
@@ -1320,22 +2078,25 @@ func (c *Client) CreateSmartPlaylist(ctx context.Context, title string, playlist
 
 // GetDirectorID looks up a director by name and returns their ID
 func (c *Client) GetDirectorID(ctx context.Context, sectionID string, directorName string) (string, error) {
-	directors, err := c.GetDirectors(ctx, sectionID)
+	return c.ResolveLibraryTagID(ctx, sectionID, "director", directorName)
+}
+
+func (c *Client) ResolveLibraryTagID(ctx context.Context, sectionID string, tagType string, value string) (string, error) {
+	tags, err := c.GetLibraryTags(ctx, sectionID, tagType)
 	if err != nil {
 		return "", err
 	}
 
-	directorLower := strings.ToLower(directorName)
-	for _, d := range directors {
-		if strings.Contains(strings.ToLower(d.Name), directorLower) {
-			return d.ID, nil
+	match, err := resolveLibraryTag(tags, value)
+	if err != nil {
+		return "", &PlexError{
+			Op:      "ResolveLibraryTagID",
+			Section: sectionID,
+			Err:     fmt.Errorf("could not resolve filter value %q for %s: %w", value, tagType, err),
 		}
 	}
 
-	return "", &PlexError{
-		Op:  "GetDirectorID",
-		Err: fmt.Errorf("director not found: %s", directorName),
-	}
+	return match.ID, nil
 }
 
 // AddToPlaylist adds items to an existing playlist
@@ -2690,6 +3451,191 @@ func parseBoolAttr(raw string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func buildSmartPlaylistURI(sectionID string, playlistType string, filters SmartPlaylistFilters) string {
+	values := url.Values{}
+	values.Set("type", mediaTypeForPlaylistType(playlistType))
+	values.Set("sort", "titleSort")
+
+	setSingle(values, "director", filters.Directors)
+	setSingle(values, "genre", filters.Genres)
+	setSingle(values, "country", filters.Countries)
+	setSingle(values, "collection", filters.Collections)
+	setSingle(values, "studio", filters.Studios)
+
+	if filters.YearFrom > 0 {
+		values.Set("year>=", strconv.Itoa(filters.YearFrom))
+	}
+	if filters.YearTo > 0 {
+		values.Set("year<=", strconv.Itoa(filters.YearTo))
+	}
+	if filters.Unwatched {
+		values.Set("unwatched", "1")
+	}
+
+	filterPath := fmt.Sprintf("/library/sections/%s/all?%s", sectionID, values.Encode())
+	return fmt.Sprintf("library://x/directory/%s", url.QueryEscape(filterPath))
+}
+
+func mediaTypeForPlaylistType(playlistType string) string {
+	if playlistType == "audio" {
+		return "10"
+	}
+	return "1"
+}
+
+func setSingle(values url.Values, key string, items []string) {
+	items = normalizeSmartPlaylistFilterValues(items)
+	if len(items) == 0 {
+		return
+	}
+	values.Set(key, items[0])
+}
+
+func (f SmartPlaylistFilters) isEmpty() bool {
+	return len(normalizeSmartPlaylistFilterValues(f.Directors)) == 0 &&
+		len(normalizeSmartPlaylistFilterValues(f.Genres)) == 0 &&
+		len(normalizeSmartPlaylistFilterValues(f.Countries)) == 0 &&
+		len(normalizeSmartPlaylistFilterValues(f.Collections)) == 0 &&
+		len(normalizeSmartPlaylistFilterValues(f.Studios)) == 0 &&
+		f.YearFrom == 0 &&
+		f.YearTo == 0 &&
+		!f.Unwatched
+}
+
+func normalizeSmartPlaylistFilters(filters SmartPlaylistFilters) (SmartPlaylistFilters, error) {
+	filters.Directors = normalizeSmartPlaylistFilterValues(filters.Directors)
+	filters.Genres = normalizeSmartPlaylistFilterValues(filters.Genres)
+	filters.Countries = normalizeSmartPlaylistFilterValues(filters.Countries)
+	filters.Collections = normalizeSmartPlaylistFilterValues(filters.Collections)
+	filters.Studios = normalizeSmartPlaylistFilterValues(filters.Studios)
+
+	if err := validateSingleSmartPlaylistFilter("director", filters.Directors); err != nil {
+		return SmartPlaylistFilters{}, err
+	}
+	if err := validateSingleSmartPlaylistFilter("genre", filters.Genres); err != nil {
+		return SmartPlaylistFilters{}, err
+	}
+	if err := validateSingleSmartPlaylistFilter("country", filters.Countries); err != nil {
+		return SmartPlaylistFilters{}, err
+	}
+	if err := validateSingleSmartPlaylistFilter("collection", filters.Collections); err != nil {
+		return SmartPlaylistFilters{}, err
+	}
+	if err := validateSingleSmartPlaylistFilter("studio", filters.Studios); err != nil {
+		return SmartPlaylistFilters{}, err
+	}
+
+	if filters.YearFrom < 0 {
+		return SmartPlaylistFilters{}, fmt.Errorf("year-from cannot be negative")
+	}
+	if filters.YearTo < 0 {
+		return SmartPlaylistFilters{}, fmt.Errorf("year-to cannot be negative")
+	}
+	if filters.YearFrom > 0 && filters.YearTo > 0 && filters.YearFrom > filters.YearTo {
+		return SmartPlaylistFilters{}, fmt.Errorf("year-from cannot be greater than year-to")
+	}
+	if filters.isEmpty() {
+		return SmartPlaylistFilters{}, fmt.Errorf("at least one filter is required")
+	}
+
+	return filters, nil
+}
+
+func normalizeSmartPlaylistFilterValues(items []string) []string {
+	filtered := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			if _, ok := seen[trimmed]; ok {
+				continue
+			}
+			seen[trimmed] = struct{}{}
+			filtered = append(filtered, trimmed)
+		}
+	}
+	return filtered
+}
+
+func validateSingleSmartPlaylistFilter(name string, items []string) error {
+	if len(items) > 1 {
+		return fmt.Errorf("multiple %s filters are not supported", name)
+	}
+	return nil
+}
+
+func resolveLibraryTag(tags []LibraryTagInfo, query string) (LibraryTagInfo, error) {
+	normalizedQuery := normalizeTagName(query)
+	if normalizedQuery == "" {
+		return LibraryTagInfo{}, fmt.Errorf("empty value")
+	}
+
+	for _, tag := range tags {
+		if normalizeTagName(tag.Name) == normalizedQuery {
+			return tag, nil
+		}
+	}
+
+	var partialMatches []LibraryTagInfo
+	for _, tag := range tags {
+		if strings.Contains(normalizeTagName(tag.Name), normalizedQuery) {
+			partialMatches = append(partialMatches, tag)
+		}
+	}
+
+	switch len(partialMatches) {
+	case 0:
+		return LibraryTagInfo{}, fmt.Errorf("not found")
+	case 1:
+		return partialMatches[0], nil
+	default:
+		names := make([]string, 0, len(partialMatches))
+		for _, tag := range partialMatches {
+			names = append(names, tag.Name)
+		}
+		sort.Strings(names)
+		return LibraryTagInfo{}, fmt.Errorf("ambiguous (%s)", strings.Join(names, ", "))
+	}
+}
+
+func normalizeTagName(input string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(input)) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func rawSearchResultFromMetadata(item rawMediaMetadata) SearchResult {
+	guid := item.GUID
+	if guid == nil {
+		if rawGUID := firstRawGUID(item.Guid); rawGUID != "" {
+			guid = &rawGUID
+		}
+	}
+
+	return SearchResult{
+		RatingKey:           item.RatingKey,
+		Key:                 item.Key,
+		Title:               item.Title,
+		Type:                item.Type,
+		Year:                item.Year,
+		GrandparentTitle:    item.GrandparentTitle,
+		ParentTitle:         item.ParentTitle,
+		ParentIndex:         item.ParentIndex,
+		Index:               item.Index,
+		Thumb:               item.Thumb,
+		LibrarySectionID:    item.LibrarySectionID,
+		LibrarySectionTitle: item.LibrarySectionTitle,
+		GUID:                guid,
+		Genres:              extractRawTagNames(item.Genre),
+		Countries:           extractRawTagNames(item.Country),
+		Collections:         extractRawTagNames(item.Collection),
+		Studio:              item.Studio,
 	}
 }
 
