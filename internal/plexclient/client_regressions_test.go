@@ -1,0 +1,472 @@
+package plexclient
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestSearchLibrary_DedupesSharedGUIDAcrossHubs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/hubs/search" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"MediaContainer": {
+				"Hub": [
+					{
+						"Metadata": [
+							{
+								"ratingKey": "42",
+								"key": "/library/metadata/42",
+								"title": "Ghost in the Shell",
+								"type": "movie",
+								"guid": "plex://movie/123",
+								"librarySectionID": 1,
+								"librarySectionTitle": "Movies"
+							}
+						]
+					},
+					{
+						"Metadata": [
+							{
+								"ratingKey": "42",
+								"key": "/library/metadata/42",
+								"title": "Ghost in the Shell",
+								"type": "movie",
+								"guid": "plex://movie/123",
+								"thumb": "/library/metadata/99/thumb/1"
+							}
+						]
+					}
+				]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	results, err := client.SearchLibrary(context.Background(), "Ghost in the Shell", nil, 10)
+	if err != nil {
+		t.Fatalf("SearchLibrary() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 logical result, got %#v", results)
+	}
+	if results[0].RatingKey != "42" {
+		t.Fatalf("expected first local rating key to survive merge, got %#v", results[0])
+	}
+	if results[0].Key != "/library/metadata/42" {
+		t.Fatalf("expected first metadata key to survive merge, got %#v", results[0])
+	}
+	if results[0].GUID == nil || *results[0].GUID != "plex://movie/123" {
+		t.Fatalf("expected shared GUID to be preserved, got %#v", results[0])
+	}
+	if results[0].Thumb == nil || *results[0].Thumb != "/library/metadata/99/thumb/1" {
+		t.Fatalf("expected merged thumb metadata, got %#v", results[0])
+	}
+}
+
+func TestSearchLibrary_PreservesDistinctSectionsWhenOneHubOmitsSectionMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/hubs/search" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"MediaContainer": {
+				"Hub": [
+					{
+						"Metadata": [
+							{
+								"ratingKey": "42",
+								"key": "/library/metadata/42",
+								"title": "Heat",
+								"type": "movie",
+								"guid": "plex://movie/heat",
+								"librarySectionID": 1,
+								"librarySectionTitle": "Movies"
+							}
+						]
+					},
+					{
+						"Metadata": [
+							{
+								"ratingKey": "84",
+								"key": "/library/metadata/84",
+								"title": "Heat",
+								"type": "movie",
+								"guid": "plex://movie/heat"
+							}
+						]
+					}
+				]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	results, err := client.SearchLibrary(context.Background(), "Heat", nil, 10)
+	if err != nil {
+		t.Fatalf("SearchLibrary() error = %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected ambiguous cross-section copies to stay separate, got %#v", results)
+	}
+}
+
+func TestSearchLibrary_PreservesDistinctSectionsSharingGUID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/hubs/search" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"MediaContainer": {
+				"Hub": [
+					{
+						"Metadata": [
+							{
+								"ratingKey": "42",
+								"key": "/library/metadata/42",
+								"title": "Heat",
+								"type": "movie",
+								"guid": "plex://movie/heat",
+								"librarySectionID": 1,
+								"librarySectionTitle": "Movies"
+							}
+						]
+					},
+					{
+						"Metadata": [
+							{
+								"ratingKey": "84",
+								"key": "/library/metadata/84",
+								"title": "Heat",
+								"type": "movie",
+								"guid": "plex://movie/heat",
+								"librarySectionID": 2,
+								"librarySectionTitle": "4K Movies"
+							}
+						]
+					}
+				]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	results, err := client.SearchLibrary(context.Background(), "Heat", nil, 10)
+	if err != nil {
+		t.Fatalf("SearchLibrary() error = %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected section-distinct results to survive, got %#v", results)
+	}
+	if results[0].LibrarySectionID == nil || *results[0].LibrarySectionID != 1 {
+		t.Fatalf("expected first result to keep section 1, got %#v", results[0])
+	}
+	if results[1].LibrarySectionID == nil || *results[1].LibrarySectionID != 2 {
+		t.Fatalf("expected second result to keep section 2, got %#v", results[1])
+	}
+}
+
+func TestSearchLibrary_PreservesDistinctEpisodesWithSharedFallbackTitle(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/hubs/search" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"MediaContainer": {
+				"Hub": [
+					{
+						"Metadata": [
+							{
+								"ratingKey": "101",
+								"key": "/library/metadata/101",
+								"title": "Pilot",
+								"type": "episode",
+								"year": 2024,
+								"grandparentTitle": "Show One",
+								"parentTitle": "Season 1",
+								"parentIndex": 1,
+								"index": 1
+							}
+						]
+					},
+					{
+						"Metadata": [
+							{
+								"title": "Pilot",
+								"type": "episode",
+								"year": 2024,
+								"grandparentTitle": "Show Two",
+								"parentTitle": "Season 1",
+								"parentIndex": 1,
+								"index": 1,
+								"guid": "plex://episode/202"
+							}
+						]
+					}
+				]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	results, err := client.SearchLibrary(context.Background(), "Pilot", nil, 10)
+	if err != nil {
+		t.Fatalf("SearchLibrary() error = %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected title-only episodic collisions to stay distinct, got %#v", results)
+	}
+}
+
+func TestCreateSmartPlaylist_RejectsEmptyLegacyFilterValue(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		t.Fatalf("CreateSmartPlaylist() should fail before making a request, got %s", r.URL.String())
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	playlist, err := client.CreateSmartPlaylist(context.Background(), "Directors", "video", "1", "director", "   ")
+	if err == nil {
+		t.Fatal("expected empty legacy filter value to fail")
+	}
+	if playlist != nil {
+		t.Fatalf("expected nil playlist on validation failure, got %#v", playlist)
+	}
+	if !strings.Contains(err.Error(), "filter value is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("expected no outbound requests, got %d", requests)
+	}
+}
+
+func TestCreateSmartPlaylistWithFilters_RejectsWhitespaceOnlyFilters(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		t.Fatalf("CreateSmartPlaylistWithFilters() should fail before making a request, got %s", r.URL.String())
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	playlist, err := client.CreateSmartPlaylistWithFilters(context.Background(), "Blank", "video", "1", SmartPlaylistFilters{
+		Directors: []string{"", "   "},
+	})
+	if err == nil {
+		t.Fatal("expected whitespace-only filters to fail")
+	}
+	if playlist != nil {
+		t.Fatalf("expected nil playlist on validation failure, got %#v", playlist)
+	}
+	if !strings.Contains(err.Error(), "at least one filter is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("expected no outbound requests, got %d", requests)
+	}
+}
+
+func TestCreateSmartPlaylistWithFilters_RejectsNegativeYears(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		t.Fatalf("CreateSmartPlaylistWithFilters() should fail before making a request, got %s", r.URL.String())
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	playlist, err := client.CreateSmartPlaylistWithFilters(context.Background(), "Years", "video", "1", SmartPlaylistFilters{
+		YearFrom: -1,
+	})
+	if err == nil {
+		t.Fatal("expected negative year bounds to fail")
+	}
+	if playlist != nil {
+		t.Fatalf("expected nil playlist on validation failure, got %#v", playlist)
+	}
+	if !strings.Contains(err.Error(), "year-from cannot be negative") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("expected no outbound requests, got %d", requests)
+	}
+}
+
+func TestCreateSmartPlaylistWithFilters_RejectsMultipleGenreFilters(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		t.Fatalf("CreateSmartPlaylistWithFilters() should fail before making a request, got %s", r.URL.String())
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	playlist, err := client.CreateSmartPlaylistWithFilters(context.Background(), "Genres", "video", "1", SmartPlaylistFilters{
+		Genres: []string{"21", "22"},
+	})
+	if err == nil {
+		t.Fatal("expected multiple genre filters to fail")
+	}
+	if playlist != nil {
+		t.Fatalf("expected nil playlist on validation failure, got %#v", playlist)
+	}
+	if !strings.Contains(err.Error(), "multiple genre filters are not supported") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("expected no outbound requests, got %d", requests)
+	}
+}
+
+func TestGetMetadataSearchResult_PreservesCollectionsFromMetadataLookup(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/library/metadata/123" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"MediaContainer": {
+				"Metadata": [
+					{
+						"ratingKey": "123",
+						"key": "/library/metadata/123",
+						"title": "Avalon",
+						"type": "episode",
+						"thumb": "/library/metadata/123/thumb/1",
+						"parentTitle": "Season 1",
+						"parentIndex": 1,
+						"index": 7,
+						"Collection": [
+							{"tag": "Cyberpunk"},
+							{"tag": "Anime Essentials"}
+						]
+					}
+				]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	result, err := client.GetMetadataSearchResult(context.Background(), "123")
+	if err != nil {
+		t.Fatalf("GetMetadataSearchResult() error = %v", err)
+	}
+	if strings.Join(result.Collections, ",") != "Cyberpunk,Anime Essentials" {
+		t.Fatalf("expected collections to survive metadata conversion, got %#v", result)
+	}
+	if result.Thumb == nil || *result.Thumb != "/library/metadata/123/thumb/1" {
+		t.Fatalf("expected thumb to survive metadata conversion, got %#v", result)
+	}
+	if result.ParentTitle == nil || *result.ParentTitle != "Season 1" {
+		t.Fatalf("expected parent title to survive metadata conversion, got %#v", result)
+	}
+	if result.ParentIndex == nil || *result.ParentIndex != 1 {
+		t.Fatalf("expected parent index to survive metadata conversion, got %#v", result)
+	}
+	if result.Index == nil || *result.Index != 7 {
+		t.Fatalf("expected item index to survive metadata conversion, got %#v", result)
+	}
+}
+
+func TestGetRelatedItems_PreservesThumbAndParentContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/library/metadata/123/related" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"MediaContainer": {
+				"Metadata": [
+					{
+						"ratingKey": "456",
+						"key": "/library/metadata/456",
+						"title": "Stand Alone Complex",
+						"type": "episode",
+						"guid": "plex://episode/456",
+						"thumb": "/library/metadata/456/thumb/1",
+						"parentTitle": "Season 2",
+						"parentIndex": 2,
+						"index": 3
+					}
+				]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	items, err := client.GetRelatedItems(context.Background(), "123")
+	if err != nil {
+		t.Fatalf("GetRelatedItems() error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 related item, got %#v", items)
+	}
+	if items[0].Thumb == nil || *items[0].Thumb != "/library/metadata/456/thumb/1" {
+		t.Fatalf("expected thumb to survive discovery conversion, got %#v", items[0])
+	}
+	if items[0].ParentTitle == nil || *items[0].ParentTitle != "Season 2" {
+		t.Fatalf("expected parent title to survive discovery conversion, got %#v", items[0])
+	}
+	if items[0].ParentIndex == nil || *items[0].ParentIndex != 2 {
+		t.Fatalf("expected parent index to survive discovery conversion, got %#v", items[0])
+	}
+	if items[0].Index == nil || *items[0].Index != 3 {
+		t.Fatalf("expected item index to survive discovery conversion, got %#v", items[0])
+	}
+}
