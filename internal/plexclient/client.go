@@ -2001,14 +2001,14 @@ func (c *Client) CreateSmartPlaylistWithFilters(ctx context.Context, title strin
 		}
 	}
 
-	var err error
-	filters, err = normalizeSmartPlaylistFilters(filters)
-	if err != nil {
+	normalizedFilters, normalizeErr := normalizeSmartPlaylistFilters(filters)
+	if normalizeErr != nil {
 		return nil, &PlexError{
 			Op:  "CreateSmartPlaylistWithFilters",
-			Err: err,
+			Err: normalizeErr,
 		}
 	}
+	filters = normalizedFilters
 
 	if playlistType == "" {
 		playlistType = "video"
@@ -2017,7 +2017,7 @@ func (c *Client) CreateSmartPlaylistWithFilters(ctx context.Context, title strin
 	var playlist *PlaylistInfo
 
 	uri := buildSmartPlaylistURI(sectionID, playlistType, filters)
-	err = c.executeWithRetry(ctx, "CreateSmartPlaylistWithFilters", func() error {
+	executeErr := c.executeWithRetry(ctx, "CreateSmartPlaylistWithFilters", func() error {
 		urlStr := fmt.Sprintf("%s/playlists?title=%s&type=%s&smart=1&uri=%s&X-Plex-Token=%s",
 			c.serverURL, url.QueryEscape(title), playlistType, url.QueryEscape(uri), c.token)
 
@@ -2066,10 +2066,10 @@ func (c *Client) CreateSmartPlaylistWithFilters(ctx context.Context, title strin
 		return nil
 	})
 
-	if err != nil {
+	if executeErr != nil {
 		return nil, &PlexError{
 			Op:  "CreateSmartPlaylistWithFilters",
-			Err: err,
+			Err: executeErr,
 		}
 	}
 
