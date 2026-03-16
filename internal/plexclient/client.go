@@ -857,9 +857,9 @@ func (c *Client) GetHistory(ctx context.Context, limit int) ([]HistoryItem, erro
 
 		req.Header.Set("Accept", "application/json")
 
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			return fmt.Errorf("failed to make request: %w", err)
+		resp, respErr := c.httpClient.Do(req)
+		if respErr != nil {
+			return fmt.Errorf("failed to make request: %w", respErr)
 		}
 		defer resp.Body.Close()
 
@@ -867,9 +867,9 @@ func (c *Client) GetHistory(ctx context.Context, limit int) ([]HistoryItem, erro
 			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 		}
 
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("failed to read response body: %w", err)
+		body, bodyErr := io.ReadAll(resp.Body)
+		if bodyErr != nil {
+			return fmt.Errorf("failed to read response body: %w", bodyErr)
 		}
 
 		var rawResp rawHistoryResponse
@@ -2028,9 +2028,9 @@ func (c *Client) CreateSmartPlaylistWithFilters(ctx context.Context, title strin
 
 		req.Header.Set("Accept", "application/json")
 
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			return fmt.Errorf("failed to make request: %w", err)
+		resp, respErr := c.httpClient.Do(req)
+		if respErr != nil {
+			return fmt.Errorf("failed to make request: %w", respErr)
 		}
 		defer resp.Body.Close()
 
@@ -2039,9 +2039,9 @@ func (c *Client) CreateSmartPlaylistWithFilters(ctx context.Context, title strin
 			return fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
 		}
 
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("failed to read response body: %w", err)
+		body, bodyErr := io.ReadAll(resp.Body)
+		if bodyErr != nil {
+			return fmt.Errorf("failed to read response body: %w", bodyErr)
 		}
 
 		var rawResp rawPlaylistsResponse
