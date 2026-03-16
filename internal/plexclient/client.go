@@ -541,18 +541,18 @@ func SearchResultFromMetadata(item *components.Metadata) SearchResult {
 	result.Key = anyToStringMetadata(item.Key)
 
 	if item.Year != nil {
-		year := int(*item.Year)
+		year := *item.Year
 		result.Year = &year
 	}
 	if item.ParentTitle != nil {
 		result.ParentTitle = item.ParentTitle
 	}
 	if item.ParentIndex != nil {
-		parentIndex := int(*item.ParentIndex)
+		parentIndex := *item.ParentIndex
 		result.ParentIndex = &parentIndex
 	}
 	if item.Index != nil {
-		index := int(*item.Index)
+		index := *item.Index
 		result.Index = &index
 	}
 	if item.GUID != nil && strings.TrimSpace(*item.GUID) != "" {
@@ -1897,9 +1897,9 @@ func (c *Client) CreatePlaylist(ctx context.Context, title string, playlistType 
 			urlStr += fmt.Sprintf("&uri=%s", url.QueryEscape(uri))
 		}
 
-		req, err := http.NewRequestWithContext(ctx, "POST", urlStr, nil)
-		if err != nil {
-			return fmt.Errorf("failed to create request: %w", err)
+		req, reqErr := http.NewRequestWithContext(ctx, "POST", urlStr, nil)
+		if reqErr != nil {
+			return fmt.Errorf("failed to create request: %w", reqErr)
 		}
 
 		req.Header.Set("Accept", "application/json")

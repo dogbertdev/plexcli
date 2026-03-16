@@ -148,7 +148,7 @@ func TestResolveLibraryTag(t *testing.T) {
 		t.Fatalf("expected ID 2, got %s", match.ID)
 	}
 
-	if _, err := resolveLibraryTag(tags, "kon"); err == nil {
+	if _, ambErr := resolveLibraryTag(tags, "kon"); ambErr == nil {
 		t.Fatal("expected ambiguous partial match error")
 	}
 
