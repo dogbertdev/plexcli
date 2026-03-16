@@ -2,10 +2,11 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/dogbertdev/plexcli/internal/outfmt"
-	"github.com/dogbertdev/plexcli/internal/plexclient"
 	"io"
 	"strings"
+
+	"github.com/dogbertdev/plexcli/internal/outfmt"
+	"github.com/dogbertdev/plexcli/internal/plexclient"
 )
 
 type DiscoveryItem struct {
