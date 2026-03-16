@@ -2021,9 +2021,9 @@ func (c *Client) CreateSmartPlaylistWithFilters(ctx context.Context, title strin
 		urlStr := fmt.Sprintf("%s/playlists?title=%s&type=%s&smart=1&uri=%s&X-Plex-Token=%s",
 			c.serverURL, url.QueryEscape(title), playlistType, url.QueryEscape(uri), c.token)
 
-		req, err := http.NewRequestWithContext(ctx, "POST", urlStr, nil)
-		if err != nil {
-			return fmt.Errorf("failed to create request: %w", err)
+		req, reqErr := http.NewRequestWithContext(ctx, "POST", urlStr, nil)
+		if reqErr != nil {
+			return fmt.Errorf("failed to create request: %w", reqErr)
 		}
 
 		req.Header.Set("Accept", "application/json")
