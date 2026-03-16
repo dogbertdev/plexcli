@@ -361,9 +361,9 @@ func (c *Client) GetItemMetadata(ctx context.Context, ratingKey string) (*compon
 
 		req.Header.Set("Accept", "application/json")
 
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			return fmt.Errorf("failed to make request: %w", err)
+		resp, respErr := c.httpClient.Do(req)
+		if respErr != nil {
+			return fmt.Errorf("failed to make request: %w", respErr)
 		}
 		defer resp.Body.Close()
 
@@ -371,9 +371,9 @@ func (c *Client) GetItemMetadata(ctx context.Context, ratingKey string) (*compon
 			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 		}
 
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("failed to read response body: %w", err)
+		body, bodyErr := io.ReadAll(resp.Body)
+		if bodyErr != nil {
+			return fmt.Errorf("failed to read response body: %w", bodyErr)
 		}
 
 		var rawResp rawLibraryItemsResponse
