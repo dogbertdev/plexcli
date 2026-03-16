@@ -2,41 +2,11 @@ package cmd
 
 import (
 	"fmt"
-	"io"
-	"strings"
-
-	"github.com/alecthomas/kong"
-
-	"github.com/dogbertdev/plexcli/internal/config"
 	"github.com/dogbertdev/plexcli/internal/outfmt"
 	"github.com/dogbertdev/plexcli/internal/plexclient"
-	"github.com/dogbertdev/plexcli/internal/ui"
+	"io"
+	"strings"
 )
-
-type LibraryDiscoverCmd struct {
-	Similar LibraryDiscoverSimilarCmd `cmd:"" help:"List similar items for a metadata item"`
-	Related LibraryDiscoverRelatedCmd `cmd:"" help:"List related items for a metadata item"`
-	Matches LibraryDiscoverMatchesCmd `cmd:"" help:"List Plex metadata matches for a metadata item"`
-}
-
-type LibraryDiscoverSimilarCmd struct {
-	RatingKey string `arg:"" help:"Metadata rating key"`
-	Limit     int    `help:"Maximum number of results" default:"50"`
-	Compact   bool   `help:"Return a flat compact record set"`
-	Output    string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
-}
-
-type LibraryDiscoverRelatedCmd struct {
-	RatingKey string `arg:"" help:"Metadata rating key"`
-	Compact   bool   `help:"Return a flat compact record set"`
-	Output    string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
-}
-
-type LibraryDiscoverMatchesCmd struct {
-	RatingKey string `arg:"" help:"Metadata rating key"`
-	Compact   bool   `help:"Return a flat compact record set"`
-	Output    string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
-}
 
 type DiscoveryItem struct {
 	RatingKey    string   `json:"rating_key"`
@@ -77,46 +47,23 @@ type DiscoveryMatchCompactItem struct {
 
 var newLibraryDiscoverClientContext = NewClientContext
 
-func (c *LibraryDiscoverSimilarCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	cc, err := newLibraryDiscoverClientContext(cfg)
-	if err != nil {
-		return err
+func splitLibraryDiscoverIDs(input string) ([]string, error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return nil, fmt.Errorf("metadata rating key is required")
 	}
-	defer cc.Cancel()
 
-	results, err := cc.Client.ListSimilar(cc.Ctx, c.RatingKey, c.Limit)
-	if err != nil {
-		return fmt.Errorf("failed to list similar items: %w", err)
+	parts := strings.Split(trimmed, ",")
+	ids := make([]string, 0, len(parts))
+	for _, part := range parts {
+		id := strings.TrimSpace(part)
+		if id == "" {
+			return nil, fmt.Errorf("metadata IDs contain an empty segment")
+		}
+		ids = append(ids, id)
 	}
-	return outputDiscoveryResults(u.Out(), c.Output, c.Compact, results)
-}
 
-func (c *LibraryDiscoverRelatedCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	cc, err := newLibraryDiscoverClientContext(cfg)
-	if err != nil {
-		return err
-	}
-	defer cc.Cancel()
-
-	results, err := cc.Client.GetRelatedItems(cc.Ctx, c.RatingKey)
-	if err != nil {
-		return fmt.Errorf("failed to list related items: %w", err)
-	}
-	return outputDiscoveryResults(u.Out(), c.Output, c.Compact, results)
-}
-
-func (c *LibraryDiscoverMatchesCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	cc, err := newLibraryDiscoverClientContext(cfg)
-	if err != nil {
-		return err
-	}
-	defer cc.Cancel()
-
-	results, err := cc.Client.SearchMatches(cc.Ctx, c.RatingKey, "", 0)
-	if err != nil {
-		return fmt.Errorf("failed to list matches: %w", err)
-	}
-	return outputDiscoveryMatches(u.Out(), c.Output, c.Compact, results)
+	return ids, nil
 }
 
 func outputDiscoveryResults(w io.Writer, format string, compact bool, results []plexclient.SearchResult) error {
