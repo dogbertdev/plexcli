@@ -3459,11 +3459,11 @@ func buildSmartPlaylistURI(sectionID string, playlistType string, filters SmartP
 	values.Set("type", mediaTypeForPlaylistType(playlistType))
 	values.Set("sort", "titleSort")
 
-	setSingle(values, "director", filters.Directors)
-	setSingle(values, "genre", filters.Genres)
-	setSingle(values, "country", filters.Countries)
-	setSingle(values, "collection", filters.Collections)
-	setSingle(values, "studio", filters.Studios)
+	setMulti(values, "director", filters.Directors)
+	setMulti(values, "genre", filters.Genres)
+	setMulti(values, "country", filters.Countries)
+	setMulti(values, "collection", filters.Collections)
+	setMulti(values, "studio", filters.Studios)
 
 	if filters.YearFrom > 0 {
 		values.Set("year>=", strconv.Itoa(filters.YearFrom))
@@ -3486,12 +3486,12 @@ func mediaTypeForPlaylistType(playlistType string) string {
 	return "1"
 }
 
-func setSingle(values url.Values, key string, items []string) {
+func setMulti(values url.Values, key string, items []string) {
 	items = normalizeSmartPlaylistFilterValues(items)
 	if len(items) == 0 {
 		return
 	}
-	values.Set(key, items[0])
+	values.Set(key, strings.Join(items, ","))
 }
 
 func (f SmartPlaylistFilters) isEmpty() bool {
@@ -3511,22 +3511,6 @@ func normalizeSmartPlaylistFilters(filters SmartPlaylistFilters) (SmartPlaylistF
 	filters.Countries = normalizeSmartPlaylistFilterValues(filters.Countries)
 	filters.Collections = normalizeSmartPlaylistFilterValues(filters.Collections)
 	filters.Studios = normalizeSmartPlaylistFilterValues(filters.Studios)
-
-	if err := validateSingleSmartPlaylistFilter("director", filters.Directors); err != nil {
-		return SmartPlaylistFilters{}, err
-	}
-	if err := validateSingleSmartPlaylistFilter("genre", filters.Genres); err != nil {
-		return SmartPlaylistFilters{}, err
-	}
-	if err := validateSingleSmartPlaylistFilter("country", filters.Countries); err != nil {
-		return SmartPlaylistFilters{}, err
-	}
-	if err := validateSingleSmartPlaylistFilter("collection", filters.Collections); err != nil {
-		return SmartPlaylistFilters{}, err
-	}
-	if err := validateSingleSmartPlaylistFilter("studio", filters.Studios); err != nil {
-		return SmartPlaylistFilters{}, err
-	}
 
 	if filters.YearFrom < 0 {
 		return SmartPlaylistFilters{}, fmt.Errorf("year-from cannot be negative")
@@ -3558,14 +3542,6 @@ func normalizeSmartPlaylistFilterValues(items []string) []string {
 	}
 	return filtered
 }
-
-func validateSingleSmartPlaylistFilter(name string, items []string) error {
-	if len(items) > 1 {
-		return fmt.Errorf("multiple %s filters are not supported", name)
-	}
-	return nil
-}
-
 func resolveLibraryTag(tags []LibraryTagInfo, query string) (LibraryTagInfo, error) {
 	normalizedQuery := normalizeTagName(query)
 	if normalizedQuery == "" {

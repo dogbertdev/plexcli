@@ -86,11 +86,11 @@ func TestParseOptionalInt64(t *testing.T) {
 
 func TestBuildSmartPlaylistURI(t *testing.T) {
 	uri := buildSmartPlaylistURI("1", "video", SmartPlaylistFilters{
-		Directors:   []string{"11"},
-		Genres:      []string{"21"},
+		Directors:   []string{"11", "12"},
+		Genres:      []string{"21", "22"},
 		Countries:   []string{"31"},
-		Collections: []string{"41"},
-		Studios:     []string{"51"},
+		Collections: []string{"41", "42"},
+		Studios:     []string{"51", "52"},
 		YearFrom:    1990,
 		YearTo:      2000,
 		Unwatched:   true,
@@ -118,11 +118,17 @@ func TestBuildSmartPlaylistURI(t *testing.T) {
 		t.Fatalf("ParseQuery() error = %v", err)
 	}
 
-	if values.Get("director") != "11" {
+	if values.Get("director") != "11,12" {
 		t.Fatalf("unexpected director filter: %q", values.Get("director"))
 	}
-	if values.Get("genre") != "21" {
+	if values.Get("genre") != "21,22" {
 		t.Fatalf("unexpected genre filter: %q", values.Get("genre"))
+	}
+	if values.Get("collection") != "41,42" {
+		t.Fatalf("unexpected collection filter: %q", values.Get("collection"))
+	}
+	if values.Get("studio") != "51,52" {
+		t.Fatalf("unexpected studio filter: %q", values.Get("studio"))
 	}
 	if values.Get("year>=") != "1990" || values.Get("year<=") != "2000" {
 		t.Fatalf("unexpected year filters: %v", values)

@@ -490,21 +490,6 @@ func (c *PlaylistSmartCmd) validate() error {
 	if c.noFilters() {
 		return fmt.Errorf("at least one filter is required")
 	}
-	if err := validateSinglePlaylistSmartArg("director", c.Director); err != nil {
-		return err
-	}
-	if err := validateSinglePlaylistSmartArg("genre", c.Genre); err != nil {
-		return err
-	}
-	if err := validateSinglePlaylistSmartArg("country", c.Country); err != nil {
-		return err
-	}
-	if err := validateSinglePlaylistSmartArg("collection", c.Collection); err != nil {
-		return err
-	}
-	if err := validateSinglePlaylistSmartArg("studio", c.Studio); err != nil {
-		return err
-	}
 	if c.YearFrom < 0 {
 		return fmt.Errorf("--year-from cannot be negative")
 	}
@@ -525,24 +510,6 @@ func nonEmptyArgs(values []string) []string {
 		}
 	}
 	return filtered
-}
-
-func validateSinglePlaylistSmartArg(name string, values []string) error {
-	filtered := nonEmptyArgs(values)
-	seen := make(map[string]struct{}, len(filtered))
-	distinct := 0
-	for _, value := range filtered {
-		normalized := strings.ToLower(value)
-		if _, ok := seen[normalized]; ok {
-			continue
-		}
-		seen[normalized] = struct{}{}
-		distinct++
-	}
-	if distinct > 1 {
-		return fmt.Errorf("multiple --%s values are not supported", name)
-	}
-	return nil
 }
 
 // PlaylistDeleteCmd deletes a playlist

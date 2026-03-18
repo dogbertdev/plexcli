@@ -181,18 +181,15 @@ func TestPlaylistSmartResolveFilters_DedupesDuplicateValues(t *testing.T) {
 	}
 }
 
-func TestPlaylistSmartValidate_RejectsMultipleGenreValues(t *testing.T) {
+func TestPlaylistSmartValidate_AllowsMultipleGenreValues(t *testing.T) {
 	cmd := PlaylistSmartCmd{
 		Section: "1",
 		Genre:   []string{"Cyberpunk", "Mecha"},
 	}
 
 	err := cmd.validate()
-	if err == nil {
-		t.Fatal("expected multiple genre values to fail")
-	}
-	if !strings.Contains(err.Error(), "multiple --genre values are not supported") {
-		t.Fatalf("unexpected error: %v", err)
+	if err != nil {
+		t.Fatalf("expected multiple genre values to be allowed, got %v", err)
 	}
 }
 

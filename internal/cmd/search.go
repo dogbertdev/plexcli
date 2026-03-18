@@ -61,7 +61,7 @@ func (c *SearchCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
 		return fmt.Errorf("search failed: %w", err)
 	}
 
-	if err := validateResolvedSearchResults(c.Query, results, c.FailAmbiguous); err != nil {
+	if err := handleResolvedSearchResults(u.Err(), c.Output, c.Query, results, c.FailAmbiguous); err != nil {
 		return err
 	}
 
@@ -82,6 +82,16 @@ func validateSearchCommandOptions(first bool, failAmbiguous bool) error {
 func validateResolvedSearchResults(query string, results []plexclient.SearchResult, failAmbiguous bool) error {
 	if failAmbiguous && len(results) > 1 {
 		return fmt.Errorf("search returned %d results for %q", len(results), query)
+	}
+	return nil
+}
+
+func handleResolvedSearchResults(errOut io.Writer, output string, query string, results []plexclient.SearchResult, failAmbiguous bool) error {
+	if err := validateResolvedSearchResults(query, results, failAmbiguous); err != nil {
+		if failAmbiguous && len(results) > 1 {
+			_ = outputSearchItems(errOut, output, searchItemsFromResults(results))
+		}
+		return err
 	}
 	return nil
 }

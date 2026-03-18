@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -334,11 +335,19 @@ func TestCreateSmartPlaylistWithFilters_RejectsNegativeYears(t *testing.T) {
 	}
 }
 
-func TestCreateSmartPlaylistWithFilters_RejectsMultipleGenreFilters(t *testing.T) {
+func TestCreateSmartPlaylistWithFilters_AllowsMultipleGenreFilters(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
-		t.Fatalf("CreateSmartPlaylistWithFilters() should fail before making a request, got %s", r.URL.String())
+		if got := r.URL.Query().Get("uri"); got == "" {
+			t.Fatalf("expected smart playlist URI query, got %s", r.URL.String())
+		} else if decoded, err := url.QueryUnescape(got); err != nil {
+			t.Fatalf("QueryUnescape() error = %v", err)
+		} else if !strings.Contains(decoded, "genre=21%2C22") && !strings.Contains(decoded, "genre=21,22") {
+			t.Fatalf("expected OR genre filter in URI, got %q", decoded)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"999","key":"/playlists/999","title":"Genres","type":"playlist","playlistType":"video","leafCount":10,"smart":true}]}}`))
 	}))
 	defer server.Close()
 
@@ -350,17 +359,14 @@ func TestCreateSmartPlaylistWithFilters_RejectsMultipleGenreFilters(t *testing.T
 	playlist, err := client.CreateSmartPlaylistWithFilters(context.Background(), "Genres", "video", "1", SmartPlaylistFilters{
 		Genres: []string{"21", "22"},
 	})
-	if err == nil {
-		t.Fatal("expected multiple genre filters to fail")
+	if err != nil {
+		t.Fatalf("expected multiple genre filters to succeed, got %v", err)
 	}
-	if playlist != nil {
-		t.Fatalf("expected nil playlist on validation failure, got %#v", playlist)
+	if playlist == nil || playlist.RatingKey != "999" {
+		t.Fatalf("expected created playlist metadata, got %#v", playlist)
 	}
-	if !strings.Contains(err.Error(), "multiple genre filters are not supported") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if requests != 0 {
-		t.Fatalf("expected no outbound requests, got %d", requests)
+	if requests != 1 {
+		t.Fatalf("expected one outbound request, got %d", requests)
 	}
 }
 

@@ -33,6 +33,25 @@ func TestValidateResolvedSearchResults_FailAmbiguous(t *testing.T) {
 	}
 }
 
+func TestHandleResolvedSearchResults_FailAmbiguousPrintsCandidates(t *testing.T) {
+	var errBuf bytes.Buffer
+	results := []plexclient.SearchResult{
+		{RatingKey: "1", Title: "Ghost in the Shell", Type: "movie"},
+		{RatingKey: "2", Title: "Ghost in the Shell 2", Type: "movie"},
+	}
+
+	err := handleResolvedSearchResults(&errBuf, "tsv", "Ghost", results, true)
+	if err == nil {
+		t.Fatal("expected ambiguous results to fail")
+	}
+	if !strings.Contains(errBuf.String(), "1\tGhost in the Shell\tmovie") {
+		t.Fatalf("expected first candidate in stderr, got %q", errBuf.String())
+	}
+	if !strings.Contains(errBuf.String(), "2\tGhost in the Shell 2\tmovie") {
+		t.Fatalf("expected second candidate in stderr, got %q", errBuf.String())
+	}
+}
+
 func TestHandleSearchResolveError_NoResultsPrintsMessage(t *testing.T) {
 	var errBuf bytes.Buffer
 
