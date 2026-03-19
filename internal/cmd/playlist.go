@@ -1,13 +1,16 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/alecthomas/kong"
 
 	"github.com/dogbertdev/plexcli/internal/config"
 	"github.com/dogbertdev/plexcli/internal/outfmt"
+	"github.com/dogbertdev/plexcli/internal/plexclient"
 	"github.com/dogbertdev/plexcli/internal/ui"
 )
 
@@ -93,10 +96,11 @@ func (c *PlaylistListCmd) output(w io.Writer, items []PlaylistListItem) error {
 
 // PlaylistCreateCmd creates a new playlist
 type PlaylistCreateCmd struct {
-	Name   string   `arg:"" help:"Playlist name"`
-	Items  []string `arg:"" help:"Rating keys to add (at least one required)"`
-	Type   string   `help:"Playlist type: video, audio, photo" default:"video" enum:"video,audio,photo"`
-	Output string   `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+	Name    string   `arg:"" help:"Playlist name"`
+	Items   []string `arg:"" optional:"" help:"Rating keys to add"`
+	Queries []string `help:"Resolve and append items by title" name:"query"`
+	Type    string   `help:"Playlist type: video, audio, photo" default:"video" enum:"video,audio,photo"`
+	Output  string   `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
 type PlaylistCreateResult struct {
@@ -112,7 +116,12 @@ func (c *PlaylistCreateCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config)
 	}
 	defer cc.Cancel()
 
-	playlist, err := cc.Client.CreatePlaylist(cc.Ctx, c.Name, c.Type, c.Items)
+	items, err := c.resolveItems(u, cc.Client, cc.Ctx)
+	if err != nil {
+		return err
+	}
+
+	playlist, err := cc.Client.CreatePlaylist(cc.Ctx, c.Name, c.Type, items)
 	if err != nil {
 		return fmt.Errorf("failed to create playlist: %w", err)
 	}
@@ -143,16 +152,23 @@ func (c *PlaylistCreateCmd) output(w io.Writer, result PlaylistCreateResult) err
 
 // PlaylistSmartCmd creates a smart playlist
 type PlaylistSmartCmd struct {
-	Name     string `arg:"" help:"Playlist name"`
-	Section  string `help:"Library section ID" short:"s" required:""`
-	Director string `help:"Filter by director name" short:"d"`
-	Type     string `help:"Playlist type: video, audio" default:"video" enum:"video,audio"`
-	Output   string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+	Name       string   `arg:"" help:"Playlist name"`
+	Section    string   `help:"Library section ID" short:"s" required:""`
+	Director   []string `help:"Filter by director name" short:"d" name:"director"`
+	Genre      []string `help:"Filter by genre name" name:"genre"`
+	Country    []string `help:"Filter by country name" name:"country"`
+	Collection []string `help:"Filter by collection name" name:"collection"`
+	Studio     []string `help:"Filter by studio name" name:"studio"`
+	YearFrom   int      `help:"Inclusive lower year bound" name:"year-from"`
+	YearTo     int      `help:"Inclusive upper year bound" name:"year-to"`
+	Unwatched  bool     `help:"Only include unwatched items"`
+	Type       string   `help:"Playlist type: video, audio" default:"video" enum:"video,audio"`
+	Output     string   `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
 func (c *PlaylistSmartCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	if c.Director == "" {
-		return fmt.Errorf("at least one filter is required (e.g., --director)")
+	if err := c.validate(); err != nil {
+		return err
 	}
 
 	cc, err := NewClientContext(cfg)
@@ -161,12 +177,12 @@ func (c *PlaylistSmartCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) 
 	}
 	defer cc.Cancel()
 
-	directorID, err := cc.Client.GetDirectorID(cc.Ctx, c.Section, c.Director)
+	filters, err := c.resolveFilters(cc.Ctx, cc.Client)
 	if err != nil {
-		return fmt.Errorf("failed to find director: %w", err)
+		return err
 	}
 
-	playlist, err := cc.Client.CreateSmartPlaylist(cc.Ctx, c.Name, c.Type, c.Section, "director", directorID)
+	playlist, err := cc.Client.CreateSmartPlaylistWithFilters(cc.Ctx, c.Name, c.Type, c.Section, filters)
 	if err != nil {
 		return fmt.Errorf("failed to create smart playlist: %w", err)
 	}
@@ -198,7 +214,8 @@ func (c *PlaylistSmartCmd) output(w io.Writer, result PlaylistCreateResult) erro
 // PlaylistAddCmd adds items to a playlist
 type PlaylistAddCmd struct {
 	Playlist string   `arg:"" help:"Playlist ID (rating key)"`
-	Items    []string `arg:"" help:"Rating keys to add"`
+	Items    []string `arg:"" optional:"" help:"Rating keys to add"`
+	Queries  []string `help:"Resolve and append items by title" name:"query"`
 	Output   string   `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
@@ -209,25 +226,26 @@ type PlaylistAddResult struct {
 }
 
 func (c *PlaylistAddCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	if len(c.Items) == 0 {
-		return fmt.Errorf("at least one item rating key is required")
-	}
-
 	cc, err := NewClientContext(cfg)
 	if err != nil {
 		return err
 	}
 	defer cc.Cancel()
 
-	err = cc.Client.AddToPlaylist(cc.Ctx, c.Playlist, c.Items)
+	items, err := c.resolveItems(u, cc.Client, cc.Ctx)
+	if err != nil {
+		return err
+	}
+
+	err = cc.Client.AddToPlaylist(cc.Ctx, c.Playlist, items)
 	if err != nil {
 		return fmt.Errorf("failed to add items to playlist: %w", err)
 	}
 
 	result := PlaylistAddResult{
 		PlaylistID: c.Playlist,
-		ItemsAdded: len(c.Items),
-		Message:    fmt.Sprintf("Added %d item(s) to playlist %s", len(c.Items), c.Playlist),
+		ItemsAdded: len(items),
+		Message:    fmt.Sprintf("Added %d item(s) to playlist %s", len(items), c.Playlist),
 	}
 
 	return c.output(u.Out(), result)
@@ -333,6 +351,165 @@ func (c *PlaylistShowCmd) output(w io.Writer, items []PlaylistShowItem) error {
 	}
 
 	return formatter.Format(w, header, rows, items)
+}
+
+func (c *PlaylistCreateCmd) resolveItems(u *ui.UI, client *plexclient.Client, ctx context.Context) ([]string, error) {
+	return resolvePlaylistItems(u, client, ctx, c.Output, c.Items, c.Queries, SearchResolveOptions{
+		Limit:        plexclient.DefaultSearchLimit,
+		AllowedTypes: playlistAllowedSearchTypes(c.Type),
+	})
+}
+
+func (c *PlaylistAddCmd) resolveItems(u *ui.UI, client *plexclient.Client, ctx context.Context) ([]string, error) {
+	resolveOpts := SearchResolveOptions{
+		Limit: plexclient.DefaultSearchLimit,
+	}
+	if len(c.Queries) > 0 {
+		playlistType, err := resolvePlaylistType(ctx, client, c.Playlist)
+		if err != nil {
+			return nil, err
+		}
+		resolveOpts.AllowedTypes = playlistAllowedSearchTypes(playlistType)
+	}
+	return resolvePlaylistItems(u, client, ctx, c.Output, c.Items, c.Queries, resolveOpts)
+}
+
+func resolvePlaylistItems(u *ui.UI, client *plexclient.Client, ctx context.Context, output string, items []string, queries []string, resolveOpts SearchResolveOptions) ([]string, error) {
+	resolved := append([]string{}, items...)
+
+	for _, query := range queries {
+		resolveOpts.AllowRatingKey = false
+		result, err := resolveSingleSearchResult(ctx, client, query, resolveOpts)
+		if err != nil {
+			if ambErr, ok := err.(*AmbiguousSearchError); ok {
+				_ = outputSearchItems(u.Err(), output, searchItemsFromResults(ambErr.Candidates))
+			}
+			return nil, err
+		}
+		resolved = append(resolved, result.RatingKey)
+	}
+
+	if len(resolved) == 0 {
+		return nil, fmt.Errorf("at least one item rating key or --query is required")
+	}
+
+	return resolved, nil
+}
+
+func resolvePlaylistType(ctx context.Context, client *plexclient.Client, playlistID string) (string, error) {
+	playlists, err := client.ListPlaylists(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect playlist %s: %w", playlistID, err)
+	}
+	for _, playlist := range playlists {
+		if playlist.RatingKey == playlistID {
+			if strings.TrimSpace(playlist.PlaylistType) == "" {
+				return "", fmt.Errorf("playlist %s has no media type", playlistID)
+			}
+			return playlist.PlaylistType, nil
+		}
+	}
+	return "", fmt.Errorf("playlist %s not found", playlistID)
+}
+
+func playlistAllowedSearchTypes(playlistType string) []string {
+	switch strings.TrimSpace(playlistType) {
+	case "audio":
+		return []string{"artist", "album", "track"}
+	case "photo":
+		return []string{"photo"}
+	case "video", "":
+		return []string{"movie", "show", "season", "episode", "clip"}
+	default:
+		return nil
+	}
+}
+
+func (c *PlaylistSmartCmd) noFilters() bool {
+	return len(nonEmptyArgs(c.Director)) == 0 &&
+		len(nonEmptyArgs(c.Genre)) == 0 &&
+		len(nonEmptyArgs(c.Country)) == 0 &&
+		len(nonEmptyArgs(c.Collection)) == 0 &&
+		len(nonEmptyArgs(c.Studio)) == 0 &&
+		c.YearFrom == 0 &&
+		c.YearTo == 0 &&
+		!c.Unwatched
+}
+
+func (c *PlaylistSmartCmd) resolveFilters(ctx context.Context, client *plexclient.Client) (plexclient.SmartPlaylistFilters, error) {
+	resolve := func(tagType string, values []string) ([]string, error) {
+		values = nonEmptyArgs(values)
+		if len(values) == 0 {
+			return nil, nil
+		}
+		resolved := make([]string, 0, len(values))
+		for _, value := range values {
+			tagID, err := client.ResolveLibraryTagID(ctx, c.Section, tagType, value)
+			if err != nil {
+				return nil, err
+			}
+			resolved = append(resolved, tagID)
+		}
+		return dedupeRatingKeys(resolved), nil
+	}
+
+	directors, err := resolve("director", c.Director)
+	if err != nil {
+		return plexclient.SmartPlaylistFilters{}, err
+	}
+	genres, err := resolve("genre", c.Genre)
+	if err != nil {
+		return plexclient.SmartPlaylistFilters{}, err
+	}
+	countries, err := resolve("country", c.Country)
+	if err != nil {
+		return plexclient.SmartPlaylistFilters{}, err
+	}
+	collections, err := resolve("collection", c.Collection)
+	if err != nil {
+		return plexclient.SmartPlaylistFilters{}, err
+	}
+	studios, err := resolve("studio", c.Studio)
+	if err != nil {
+		return plexclient.SmartPlaylistFilters{}, err
+	}
+
+	return plexclient.SmartPlaylistFilters{
+		Directors:   directors,
+		Genres:      genres,
+		Countries:   countries,
+		Collections: collections,
+		Studios:     studios,
+		YearFrom:    c.YearFrom,
+		YearTo:      c.YearTo,
+		Unwatched:   c.Unwatched,
+	}, nil
+}
+
+func (c *PlaylistSmartCmd) validate() error {
+	if c.noFilters() {
+		return fmt.Errorf("at least one filter is required")
+	}
+	if c.YearFrom < 0 {
+		return fmt.Errorf("--year-from cannot be negative")
+	}
+	if c.YearTo < 0 {
+		return fmt.Errorf("--year-to cannot be negative")
+	}
+	if c.YearFrom > 0 && c.YearTo > 0 && c.YearFrom > c.YearTo {
+		return fmt.Errorf("--year-from cannot be greater than --year-to")
+	}
+	return nil
+}
+
+func nonEmptyArgs(values []string) []string {
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			filtered = append(filtered, trimmed)
+		}
+	}
+	return filtered
 }
 
 // PlaylistDeleteCmd deletes a playlist

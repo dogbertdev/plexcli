@@ -213,12 +213,15 @@ type LibraryDiscoverCommonCmd struct {
 	Output  string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 type LibraryDiscoverRelatedCmd struct {
-	IDs    string `arg:"" name:"ids" help:"Comma-separated metadata IDs"`
-	Output string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+	RatingKey string `arg:"" name:"ids" help:"Metadata rating key"`
+	Compact   bool   `help:"Return a flat compact record set"`
+	Output    string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 type LibraryDiscoverSimilarCmd struct {
-	IDs    string `arg:"" name:"ids" help:"Comma-separated metadata IDs"`
-	Output string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+	RatingKey string `arg:"" name:"ids" help:"Metadata rating key"`
+	Limit     int    `help:"Maximum number of results" default:"50"`
+	Compact   bool   `help:"Return a flat compact record set"`
+	Output    string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 type LibraryDiscoverSonicCmd struct {
 	IDs    string `arg:"" name:"ids" help:"Comma-separated metadata IDs"`
@@ -231,8 +234,9 @@ type LibraryDiscoverAutocompleteCmd struct {
 	Output  string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 type LibraryDiscoverMatchesCmd struct {
-	IDs    string `arg:"" name:"ids" help:"Comma-separated metadata IDs"`
-	Output string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+	RatingKey string `arg:"" name:"ids" help:"Metadata rating key"`
+	Compact   bool   `help:"Return a flat compact record set"`
+	Output    string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 type LibraryDiscoverRandomArtCmd struct {
 	Output string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
@@ -599,11 +603,39 @@ func (c *LibraryDiscoverCommonCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.
 }
 
 func (c *LibraryDiscoverRelatedCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	return runMetadataJSON(u, cfg, c.Output, "GetRelatedItems", c.IDs, "/related", nil)
+	cc, err := newLibraryDiscoverClientContext(cfg)
+	if err != nil {
+		return err
+	}
+	defer cc.Cancel()
+
+	encodedIDs, err := encodeCSVArg(c.RatingKey)
+	if err != nil {
+		return err
+	}
+	results, err := cc.Client.GetRelatedItems(cc.Ctx, encodedIDs)
+	if err != nil {
+		return fmt.Errorf("failed to list related items: %w", err)
+	}
+	return outputDiscoveryResults(u.Out(), c.Output, c.Compact, results)
 }
 
 func (c *LibraryDiscoverSimilarCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	return runMetadataJSON(u, cfg, c.Output, "ListSimilar", c.IDs, "/similar", nil)
+	cc, err := newLibraryDiscoverClientContext(cfg)
+	if err != nil {
+		return err
+	}
+	defer cc.Cancel()
+
+	encodedIDs, err := encodeCSVArg(c.RatingKey)
+	if err != nil {
+		return err
+	}
+	results, err := cc.Client.ListSimilar(cc.Ctx, encodedIDs, c.Limit)
+	if err != nil {
+		return fmt.Errorf("failed to list similar items: %w", err)
+	}
+	return outputDiscoveryResults(u.Out(), c.Output, c.Compact, results)
 }
 
 func (c *LibraryDiscoverSonicCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
@@ -629,7 +661,25 @@ func (c *LibraryDiscoverAutocompleteCmd) Run(ctx *kong.Context, u *ui.UI, cfg *c
 }
 
 func (c *LibraryDiscoverMatchesCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
-	return runMetadataJSON(u, cfg, c.Output, "GetLibraryMatches", c.IDs, "/matches", nil)
+	cc, err := newLibraryDiscoverClientContext(cfg)
+	if err != nil {
+		return err
+	}
+	defer cc.Cancel()
+
+	ids, err := splitLibraryDiscoverIDs(c.RatingKey)
+	if err != nil {
+		return err
+	}
+	results := make([]plexclient.MatchResult, 0, len(ids))
+	for _, id := range ids {
+		matches, matchErr := cc.Client.SearchMatches(cc.Ctx, id, "", 0)
+		if matchErr != nil {
+			return fmt.Errorf("failed to list matches for %s: %w", id, matchErr)
+		}
+		results = append(results, matches...)
+	}
+	return outputDiscoveryMatches(u.Out(), c.Output, c.Compact, results)
 }
 
 func (c *LibraryDiscoverRandomArtCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {

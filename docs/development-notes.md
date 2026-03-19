@@ -18,7 +18,9 @@ Root command is defined in `cmd/plex/main.go` and currently includes:
 - `quality-check`
 - `metadata-missing`
 - `search`
+- `recommend`
 - `libraries`
+- `library discover` (`similar`, `related`, `matches`)
 - `server-info`
 - `playlist` (`list`, `create`, `smart`, `add`, `show`, `delete`)
 - `episodes`
@@ -76,6 +78,9 @@ From `internal/config/config.go` and `internal/auth/auth.go`:
 Search and playlists are direct HTTP calls in `internal/plexclient/client.go`:
 
 - Search: `GET /hubs/search?query=<...>&limit=<n>[&sectionId=<id>]`
+- Related items: `GET /library/metadata/<id>/related`
+- Similar items: `GET /library/metadata/<id>/similar?count=<n>`
+- Matches: `PUT /library/metadata/<id>/matches`
 - List playlists: `GET /playlists`
 - Create playlist: `POST /playlists?title=<name>&type=<type>&smart=0&uri=<...>`
 - Create smart playlist: `POST /playlists?...&smart=1&uri=<library://...>`
@@ -92,6 +97,19 @@ Important URI formats:
   - `library://x/directory/<url-escaped-/library/sections/...>`
 
 Always URL-escape query params and URI payloads.
+
+Search/title resolution behavior now lives in shared helpers under `internal/cmd/search_resolver.go`:
+
+- title normalization is case-insensitive, punctuation-insensitive, and whitespace-collapsed
+- `search`, `playlist --query`, and `recommend --like` share the same ambiguity handling
+- numeric `--like` values are treated as rating keys before falling back to search
+
+Smart playlist filters are now composed as a single library query:
+
+- repeated values inside one category are joined with commas for OR semantics
+- different categories are combined in the query string for AND semantics
+- year bounds are encoded via `year>=` / `year<=`
+- unwatched uses `unwatched=1`
 
 ## Playlist from URL Workflow (Current Best Path)
 
@@ -117,7 +135,8 @@ plex playlist add <playlist-id> <ratingKey1> <ratingKey2>
 
 Notes:
 
-- `playlist create` currently requires rating keys at CLI argument level.
+- `playlist create` and `playlist add` still accept rating keys positionally.
+- `playlist create --query ...` and `playlist add --query ...` resolve titles through the shared search resolver.
 - `episodes --keys-only` emits keys space-separated for shell composition.
 
 ## Local Validation Commands

@@ -1,23 +1,27 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/alecthomas/kong"
 
 	"github.com/dogbertdev/plexcli/internal/config"
-	"github.com/dogbertdev/plexcli/internal/outfmt"
 	"github.com/dogbertdev/plexcli/internal/plexclient"
 	"github.com/dogbertdev/plexcli/internal/ui"
 )
 
 type SearchCmd struct {
-	Query   string `arg:"" help:"Search query"`
-	Section string `help:"Filter by library section ID" default:""`
-	Type    string `help:"Filter by type: movie, show, episode, artist, album, track, or all" default:"all" enum:"movie,show,episode,artist,album,track,all"`
-	Limit   int    `help:"Maximum number of results" default:"50"`
-	Output  string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+	Query         string `arg:"" help:"Search query"`
+	Section       string `help:"Filter by library section ID" default:""`
+	Type          string `help:"Filter by type: movie, show, episode, artist, album, track, or all" default:"all" enum:"movie,show,episode,artist,album,track,all"`
+	Limit         int    `help:"Maximum number of results" default:"50"`
+	Exact         bool   `help:"Only return normalized exact title matches"`
+	Year          int    `help:"Filter results by year after searching"`
+	First         bool   `help:"Return only the first surviving result"`
+	FailAmbiguous bool   `help:"Fail when more than one result remains after filtering"`
+	Output        string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
 type SearchItem struct {
@@ -31,104 +35,72 @@ type SearchItem struct {
 }
 
 func (c *SearchCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
+	if err := validateSearchCommandOptions(c.First, c.FailAmbiguous); err != nil {
+		return err
+	}
+
 	cc, err := NewClientContext(cfg)
 	if err != nil {
 		return err
 	}
 	defer cc.Cancel()
 
-	var sectionID *string
-	if c.Section != "" {
-		sectionID = &c.Section
-	}
-
-	results, err := cc.Client.SearchLibrary(cc.Ctx, c.Query, sectionID, c.Limit)
+	results, err := resolveSearchResults(cc.Ctx, cc.Client, c.Query, SearchResolveOptions{
+		SectionID:     c.Section,
+		Type:          c.Type,
+		Limit:         c.Limit,
+		Exact:         c.Exact,
+		Year:          c.Year,
+		First:         c.First,
+		FailAmbiguous: c.FailAmbiguous,
+	})
 	if err != nil {
+		if handledErr := handleSearchResolveError(u.Err(), err); handledErr == nil {
+			return nil
+		}
 		return fmt.Errorf("search failed: %w", err)
 	}
 
-	if c.Type != "all" {
-		filtered := make([]plexclient.SearchResult, 0, len(results))
-		for _, r := range results {
-			if r.Type == c.Type {
-				filtered = append(filtered, r)
-			}
-		}
-		results = filtered
+	if err := handleResolvedSearchResults(u.Err(), c.Output, c.Query, results, c.FailAmbiguous); err != nil {
+		return err
 	}
 
-	if len(results) == 0 {
-		fmt.Fprintln(u.Err(), "No results found")
+	outputItems := searchItemsFromResults(results)
+	if err := outputSearchItems(u.Out(), c.Output, outputItems); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateSearchCommandOptions(first bool, failAmbiguous bool) error {
+	if first && failAmbiguous {
+		return fmt.Errorf("--first and --fail-ambiguous cannot be used together")
+	}
+	return nil
+}
+
+func validateResolvedSearchResults(query string, results []plexclient.SearchResult, failAmbiguous bool) error {
+	if failAmbiguous && len(results) > 1 {
+		return fmt.Errorf("search returned %d results for %q", len(results), query)
+	}
+	return nil
+}
+
+func handleResolvedSearchResults(errOut io.Writer, output string, query string, results []plexclient.SearchResult, failAmbiguous bool) error {
+	if err := validateResolvedSearchResults(query, results, failAmbiguous); err != nil {
+		if failAmbiguous && len(results) > 1 {
+			_ = outputSearchItems(errOut, output, searchItemsFromResults(results))
+		}
+		return err
+	}
+	return nil
+}
+
+func handleSearchResolveError(errOut io.Writer, err error) error {
+	var noResultsErr *NoSearchResultsError
+	if errors.As(err, &noResultsErr) {
+		_, _ = fmt.Fprintln(errOut, "No results found")
 		return nil
 	}
-
-	if len(results) > c.Limit {
-		results = results[:c.Limit]
-	}
-
-	outputItems := c.toOutputItems(results)
-	return c.output(u.Out(), outputItems)
-}
-
-func (c *SearchCmd) toOutputItems(results []plexclient.SearchResult) []SearchItem {
-	output := make([]SearchItem, 0, len(results))
-	for _, r := range results {
-		item := SearchItem{
-			RatingKey: r.RatingKey,
-			Title:     r.Title,
-			Type:      r.Type,
-		}
-
-		if r.Year != nil {
-			item.Year = *r.Year
-		}
-
-		if r.GrandparentTitle != nil {
-			item.Show = *r.GrandparentTitle
-		}
-
-		if r.ParentIndex != nil {
-			item.Season = *r.ParentIndex
-		}
-
-		if r.Index != nil {
-			item.Episode = *r.Index
-		}
-
-		output = append(output, item)
-	}
-	return output
-}
-
-func (c *SearchCmd) output(w io.Writer, items []SearchItem) error {
-	formatter := outfmt.NewFormatter(outfmt.Format(c.Output))
-
-	header := []string{"RATING KEY", "TITLE", "TYPE", "YEAR", "SHOW", "S", "E"}
-	rows := make([][]string, 0, len(items))
-
-	for _, item := range items {
-		yearStr := ""
-		if item.Year > 0 {
-			yearStr = fmt.Sprintf("%d", item.Year)
-		}
-		seasonStr := ""
-		if item.Season > 0 {
-			seasonStr = fmt.Sprintf("%d", item.Season)
-		}
-		episodeStr := ""
-		if item.Episode > 0 {
-			episodeStr = fmt.Sprintf("%d", item.Episode)
-		}
-		rows = append(rows, []string{
-			item.RatingKey,
-			item.Title,
-			item.Type,
-			yearStr,
-			item.Show,
-			seasonStr,
-			episodeStr,
-		})
-	}
-
-	return formatter.Format(w, header, rows, items)
+	return err
 }
