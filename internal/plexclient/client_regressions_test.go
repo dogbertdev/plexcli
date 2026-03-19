@@ -370,6 +370,46 @@ func TestCreateSmartPlaylistWithFilters_AllowsMultipleGenreFilters(t *testing.T)
 	}
 }
 
+func TestGetRelatedItems_EncodesMetadataIDs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.RequestURI, "/library/metadata/abc%2Fdef,456/related?") {
+			t.Fatalf("unexpected request URI: %s", r.RequestURI)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"MediaContainer":{"Metadata":[]}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	if _, err := client.GetRelatedItems(context.Background(), "abc/def, 456"); err != nil {
+		t.Fatalf("GetRelatedItems() error = %v", err)
+	}
+}
+
+func TestListSimilar_EncodesMetadataIDs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.RequestURI, "/library/metadata/abc%2Fdef,456/similar?") {
+			t.Fatalf("unexpected request URI: %s", r.RequestURI)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"MediaContainer":{"Metadata":[]}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	if _, err := client.ListSimilar(context.Background(), "abc/def, 456", 10); err != nil {
+		t.Fatalf("ListSimilar() error = %v", err)
+	}
+}
+
 func TestGetMetadataSearchResult_PreservesCollectionsFromMetadataLookup(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/library/metadata/123" {

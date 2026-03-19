@@ -1459,15 +1459,29 @@ func (c *Client) GetMetadataSearchResult(ctx context.Context, ratingKey string) 
 }
 
 func (c *Client) GetRelatedItems(ctx context.Context, ids string) ([]SearchResult, error) {
-	return c.getMetadataDiscoveryItems(ctx, "GetRelatedItems", http.MethodGet, fmt.Sprintf("library/metadata/%s/related", ids), nil)
+	encodedIDs, err := encodeMetadataIDs(ids)
+	if err != nil {
+		return nil, &PlexError{
+			Op:  "GetRelatedItems",
+			Err: err,
+		}
+	}
+	return c.getMetadataDiscoveryItems(ctx, "GetRelatedItems", http.MethodGet, fmt.Sprintf("library/metadata/%s/related", encodedIDs), nil)
 }
 
 func (c *Client) ListSimilar(ctx context.Context, ids string, count int) ([]SearchResult, error) {
+	encodedIDs, err := encodeMetadataIDs(ids)
+	if err != nil {
+		return nil, &PlexError{
+			Op:  "ListSimilar",
+			Err: err,
+		}
+	}
 	params := url.Values{}
 	if count > 0 {
 		params.Set("count", strconv.Itoa(count))
 	}
-	return c.getMetadataDiscoveryItems(ctx, "ListSimilar", http.MethodGet, fmt.Sprintf("library/metadata/%s/similar", ids), params)
+	return c.getMetadataDiscoveryItems(ctx, "ListSimilar", http.MethodGet, fmt.Sprintf("library/metadata/%s/similar", encodedIDs), params)
 }
 
 func (c *Client) getMetadataDiscoveryItems(ctx context.Context, op string, method string, path string, params url.Values) ([]SearchResult, error) {
@@ -1645,11 +1659,22 @@ func appendUniqueDiscoveryItem(
 }
 
 func SearchResultLogicalKey(item SearchResult) string {
-	keys := searchResultKeys(item)
-	if len(keys) == 0 {
-		return ""
+	if item.GUID != nil {
+		guid := strings.TrimSpace(*item.GUID)
+		if guid != "" {
+			if item.LibrarySectionID != nil {
+				return fmt.Sprintf("guid:%s|section:%d", guid, *item.LibrarySectionID)
+			}
+			return "guid:" + guid
+		}
 	}
-	return keys[0]
+	if ratingKey := strings.TrimSpace(item.RatingKey); ratingKey != "" {
+		return "rating_key:" + ratingKey
+	}
+	if key := strings.TrimSpace(item.Key); key != "" {
+		return "key:" + key
+	}
+	return searchResultFallbackKey(item)
 }
 
 func mergeDiscoveryResult(base SearchResult, overlay SearchResult) SearchResult {

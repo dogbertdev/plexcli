@@ -51,12 +51,14 @@ func resolveSearchResults(ctx context.Context, client *plexclient.Client, query 
 	if opts.AllowRatingKey && looksLikeRatingKey(query) {
 		if result, err := client.GetMetadataSearchResult(ctx, query); err == nil {
 			results := filterSearchResults([]plexclient.SearchResult{result}, query, opts)
-			if len(results) > 0 {
-				return results, nil
+			if len(results) == 0 {
+				return nil, &NoSearchResultsError{Query: query}
 			}
+			return results, nil
 		} else if !errors.Is(err, plexclient.ErrMetadataNotFound) {
 			return nil, err
 		}
+		return nil, &NoSearchResultsError{Query: query}
 	}
 
 	limit := opts.Limit
@@ -125,7 +127,7 @@ func searchResultMatchesOptions(result plexclient.SearchResult, normalizedQuery 
 		return false
 	}
 	if strings.TrimSpace(opts.SectionID) != "" {
-		if result.LibrarySectionID == nil || strconv.Itoa(*result.LibrarySectionID) != strings.TrimSpace(opts.SectionID) {
+		if result.LibrarySectionID != nil && strconv.Itoa(*result.LibrarySectionID) != strings.TrimSpace(opts.SectionID) {
 			return false
 		}
 	}

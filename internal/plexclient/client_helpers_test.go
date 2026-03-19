@@ -371,3 +371,24 @@ func TestFlattenDiscoveryItems_PreservesDistinctEpisodesSharingTitle(t *testing.
 		t.Fatalf("expected distinct episodic results to stay separate, got %#v", items)
 	}
 }
+
+func TestSearchResultLogicalKey_DistinguishesSectionScopedGUIDs(t *testing.T) {
+	guid := "plex://movie/123"
+	sectionOne := 1
+	sectionTwo := 2
+
+	first := SearchResultLogicalKey(SearchResult{
+		RatingKey:        "42",
+		GUID:             &guid,
+		LibrarySectionID: &sectionOne,
+	})
+	second := SearchResultLogicalKey(SearchResult{
+		RatingKey:        "84",
+		GUID:             &guid,
+		LibrarySectionID: &sectionTwo,
+	})
+
+	if first == second {
+		t.Fatalf("expected section-distinct logical keys, got %q", first)
+	}
+}

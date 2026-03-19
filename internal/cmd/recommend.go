@@ -72,18 +72,19 @@ func (c *RecommendCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) erro
 	}
 
 	if c.PlaylistName != "" {
+		if len(results) == 0 {
+			return fmt.Errorf("no recommendations available to create playlist %q", c.PlaylistName)
+		}
 		keys := make([]string, 0, len(results))
 		for _, item := range results {
 			keys = append(keys, item.RatingKey)
 		}
-		if len(keys) > 0 {
-			playlistType := "video"
-			if c.Type == "artist" {
-				playlistType = "audio"
-			}
-			if _, err := cc.Client.CreatePlaylist(cc.Ctx, c.PlaylistName, playlistType, keys); err != nil {
-				return fmt.Errorf("failed to create recommendation playlist: %w", err)
-			}
+		playlistType := "video"
+		if c.Type == "artist" {
+			playlistType = "audio"
+		}
+		if _, err := cc.Client.CreatePlaylist(cc.Ctx, c.PlaylistName, playlistType, keys); err != nil {
+			return fmt.Errorf("failed to create recommendation playlist: %w", err)
 		}
 	}
 
@@ -167,6 +168,11 @@ func (c *RecommendCmd) recommend(client *plexclient.Client, ctx context.Context,
 		}
 
 		for _, similar := range similarItems {
+			if c.Section != "" && similar.LibrarySectionID == nil && strings.TrimSpace(similar.RatingKey) != "" {
+				if detailed, metadataErr := client.GetMetadataSearchResult(ctx, similar.RatingKey); metadataErr == nil {
+					similar = mergeSearchResult(similar, detailed)
+				}
+			}
 			if !searchResultMatchesOptions(similar, "", SearchResolveOptions{
 				SectionID: c.Section,
 				Type:      c.Type,

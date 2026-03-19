@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -67,7 +68,7 @@ func TestResolveSingleSearchResult_RatingKeyRespectsSectionFilter(t *testing.T) 
 	}
 }
 
-func TestResolveSingleSearchResult_RatingKeyFallsBackToSearchWhenFilteredOut(t *testing.T) {
+func TestResolveSingleSearchResult_RatingKeyDoesNotFallBackToSearchWhenFilteredOut(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -92,11 +93,22 @@ func TestResolveSingleSearchResult_RatingKeyFallsBackToSearchWhenFilteredOut(t *
 		Type:           "movie",
 		AllowRatingKey: true,
 	})
-	if err != nil {
-		t.Fatalf("resolveSingleSearchResult() error = %v", err)
+	if err == nil {
+		t.Fatalf("expected filtered rating-key lookup to fail instead of falling back, got %#v", result)
 	}
-	if result.RatingKey != "456" {
-		t.Fatalf("expected filtered rating-key lookup to fall back to search result, got %#v", result)
+	var noResultsErr *NoSearchResultsError
+	if !errors.As(err, &noResultsErr) {
+		t.Fatalf("expected no-results error, got %v", err)
+	}
+}
+
+func TestSearchResultMatchesOptions_AllowsMissingSectionMetadata(t *testing.T) {
+	if !searchResultMatchesOptions(plexclient.SearchResult{
+		RatingKey: "42",
+		Title:     "Heat",
+		Type:      "movie",
+	}, "", SearchResolveOptions{SectionID: "1", Type: "movie"}) {
+		t.Fatal("expected section-scoped result without librarySectionID to be retained")
 	}
 }
 

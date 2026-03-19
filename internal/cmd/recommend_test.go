@@ -26,6 +26,31 @@ func TestRecommendationDedupeKey_PrefersGUID(t *testing.T) {
 	}
 }
 
+func TestRecommendationDedupeKey_DistinguishesSectionsSharingGUID(t *testing.T) {
+	guid := "tmdb://123"
+	sectionOne := 1
+	sectionTwo := 2
+
+	first := recommendationDedupeKey(plexclient.SearchResult{
+		RatingKey:        "42",
+		Title:            "Avalon",
+		Type:             "movie",
+		GUID:             &guid,
+		LibrarySectionID: &sectionOne,
+	})
+	second := recommendationDedupeKey(plexclient.SearchResult{
+		RatingKey:        "84",
+		Title:            "Avalon",
+		Type:             "movie",
+		GUID:             &guid,
+		LibrarySectionID: &sectionTwo,
+	})
+
+	if first == second {
+		t.Fatalf("expected section-distinct copies to keep distinct dedupe keys, got %q", first)
+	}
+}
+
 func TestRecommendationDedupeKey_DistinguishesEpisodesBySeriesContext(t *testing.T) {
 	showOne := "Show One"
 	showTwo := "Show Two"
@@ -256,6 +281,52 @@ func TestRecommend_FiltersCandidatesByTypeAndSection(t *testing.T) {
 	}
 	if results[0].RatingKey != "2" {
 		t.Fatalf("expected in-section movie result to survive, got %#v", results)
+	}
+}
+
+func TestRecommend_HydratesMissingSectionMetadataBeforeFiltering(t *testing.T) {
+	sectionOne := 1
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Path {
+		case "/library/metadata/1/similar":
+			_, _ = w.Write([]byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"2","key":"/library/metadata/2","title":"Avalon","type":"movie"},{"ratingKey":"3","key":"/library/metadata/3","title":"Ghost in the Shell","type":"movie"}]}}`))
+		case "/library/metadata/2":
+			_, _ = w.Write([]byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"2","key":"/library/metadata/2","title":"Avalon","type":"movie","librarySectionID":1}]}}`))
+		case "/library/metadata/3":
+			_, _ = w.Write([]byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"3","key":"/library/metadata/3","title":"Ghost in the Shell","type":"movie","librarySectionID":2}]}}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := plexclient.NewClient(server.URL, "test-token", plexclient.WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	cmd := RecommendCmd{Type: "movie", Section: "1", Limit: 10}
+	results, err := cmd.recommend(client, context.Background(), []recommendationSeed{
+		{
+			Input: "1",
+			Item: plexclient.SearchResult{
+				RatingKey:        "1",
+				Title:            "Seed",
+				Type:             "movie",
+				LibrarySectionID: &sectionOne,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("recommend() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected only hydrated in-section recommendation, got %#v", results)
+	}
+	if results[0].RatingKey != "2" {
+		t.Fatalf("expected in-section candidate to survive after hydration, got %#v", results)
 	}
 }
 
