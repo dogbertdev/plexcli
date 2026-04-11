@@ -76,6 +76,42 @@ func TestSearchLibrary_DedupesSharedGUIDAcrossHubs(t *testing.T) {
 	}
 }
 
+func TestMovePlaylistItemBuildsMoveRequest(t *testing.T) {
+	var seenPath string
+	var seenQuery url.Values
+	var seenMethod string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenMethod = r.Method
+		seenPath = r.URL.Path
+		seenQuery = r.URL.Query()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	err = client.MovePlaylistItem(context.Background(), "55", "99", "88")
+	if err != nil {
+		t.Fatalf("MovePlaylistItem() error = %v", err)
+	}
+
+	if seenMethod != http.MethodPut {
+		t.Fatalf("expected PUT request, got %s", seenMethod)
+	}
+	if seenPath != "/playlists/55/items/99/move" {
+		t.Fatalf("unexpected path: %s", seenPath)
+	}
+	if got := seenQuery.Get("after"); got != "88" {
+		t.Fatalf("expected after query, got %q", got)
+	}
+	if got := seenQuery.Get("X-Plex-Token"); got != "test-token" {
+		t.Fatalf("expected token query, got %q", got)
+	}
+}
+
 func TestGetMoviesPagesFullSectionAndFiltersActorMetadata(t *testing.T) {
 	var starts []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

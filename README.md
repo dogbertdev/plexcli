@@ -301,6 +301,10 @@ plex playlist create "Sci-Fi Night" --from-file ./keys.txt
 # Preview resolved playlist items without modifying Plex
 plex playlist create "Sci-Fi Night" --from-file ./keys.txt --dry-run
 
+# Sort a regular playlist in place
+plex playlist sort 999 --by year --order asc
+plex playlist sort 999 --by year --order asc --dry-run
+
 # Create a playlist by resolving titles directly
 plex playlist create "Sci-Fi Night" --query "Solaris" --query "On the Silver Globe"
 

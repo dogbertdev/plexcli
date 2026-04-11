@@ -86,6 +86,7 @@ Search and playlists are direct HTTP calls in `internal/plexclient/client.go`:
 - Create smart playlist: `POST /playlists?...&smart=1&uri=<library://...>`
 - Add to playlist: `PUT /playlists/<id>/items?uri=<...>`
 - Show playlist items: `GET /playlists/<id>/items`
+- Move playlist item: `PUT /playlists/<id>/items/<playlistItemID>/move[?after=<playlistItemID>]`
 - Delete playlist: `DELETE /playlists/<id>`
 - Server UUID: `GET /identity`
 
@@ -144,6 +145,7 @@ Notes:
 - `playlist create --from-file` and `playlist create --from-stdin` accept whitespace- or comma-separated rating keys.
 - `playlist create --dry-run` previews resolved rating keys without creating the playlist.
 - `playlist create --query ...` and `playlist add --query ...` resolve titles through the shared search resolver.
+- `playlist sort` uses Plex playlist item IDs, not library rating keys. Omitting `after` moves an item to the beginning.
 - `episodes --keys-only` emits keys space-separated for shell composition.
 - `movies --keys-only` also emits keys space-separated. Movie filters OR-match repeated values within a filter type, AND-match across different filter types, and default to GUID dedupe for combined libraries.
 

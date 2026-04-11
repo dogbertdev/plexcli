@@ -1192,6 +1192,7 @@ func (c *Client) GetMaxRetries() int {
 // SearchResult represents a single search result item
 type SearchResult struct {
 	RatingKey           string   `json:"ratingKey"`
+	PlaylistItemID      string   `json:"playlistItemID,omitempty"`
 	Key                 string   `json:"key"`
 	Title               string   `json:"title"`
 	Type                string   `json:"type"`
@@ -2276,6 +2277,63 @@ func (c *Client) DeletePlaylist(ctx context.Context, playlistID string) error {
 	return nil
 }
 
+// MovePlaylistItem moves an item inside a regular playlist. When afterPlaylistItemID
+// is empty, Plex moves the item to the beginning of the playlist.
+func (c *Client) MovePlaylistItem(ctx context.Context, playlistID string, playlistItemID string, afterPlaylistItemID string) error {
+	if playlistID == "" {
+		return &PlexError{
+			Op:  "MovePlaylistItem",
+			Err: fmt.Errorf("playlist ID is required"),
+		}
+	}
+	if playlistItemID == "" {
+		return &PlexError{
+			Op:  "MovePlaylistItem",
+			Err: fmt.Errorf("playlist item ID is required"),
+		}
+	}
+
+	err := c.executeWithRetry(ctx, "MovePlaylistItem", func() error {
+		query := url.Values{}
+		query.Set("X-Plex-Token", c.token)
+		if afterPlaylistItemID != "" {
+			query.Set("after", afterPlaylistItemID)
+		}
+
+		urlStr := fmt.Sprintf("%s/playlists/%s/items/%s/move?%s",
+			c.serverURL, url.PathEscape(playlistID), url.PathEscape(playlistItemID), query.Encode())
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return &PlexError{
+			Op:  "MovePlaylistItem",
+			Err: err,
+		}
+	}
+
+	return nil
+}
+
 // GetPlaylistItems returns the items in a playlist
 func (c *Client) GetPlaylistItems(ctx context.Context, playlistID string) ([]SearchResult, error) {
 	if playlistID == "" {
@@ -2318,6 +2376,7 @@ func (c *Client) GetPlaylistItems(ctx context.Context, playlistID string) ([]Sea
 			MediaContainer struct {
 				Metadata []struct {
 					RatingKey        string  `json:"ratingKey"`
+					PlaylistItemID   any     `json:"playlistItemID"`
 					Key              string  `json:"key"`
 					Title            string  `json:"title"`
 					Type             string  `json:"type"`
@@ -2336,6 +2395,7 @@ func (c *Client) GetPlaylistItems(ctx context.Context, playlistID string) ([]Sea
 		for _, item := range altResp.MediaContainer.Metadata {
 			items = append(items, SearchResult{
 				RatingKey:        item.RatingKey,
+				PlaylistItemID:   anyToStringMetadata(item.PlaylistItemID),
 				Key:              item.Key,
 				Title:            item.Title,
 				Type:             item.Type,

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/alecthomas/kong"
@@ -22,6 +23,7 @@ type PlaylistCmd struct {
 	Smart  PlaylistSmartCmd  `cmd:"" help:"Create a smart playlist (auto-updates)"`
 	Add    PlaylistAddCmd    `cmd:"" help:"Add items to a playlist"`
 	Show   PlaylistShowCmd   `cmd:"" help:"Show items in a playlist"`
+	Sort   PlaylistSortCmd   `cmd:"" help:"Sort a regular playlist"`
 	Delete PlaylistDeleteCmd `cmd:"" help:"Delete a playlist"`
 }
 
@@ -281,13 +283,31 @@ type PlaylistShowCmd struct {
 }
 
 type PlaylistShowItem struct {
-	RatingKey string `json:"rating_key"`
-	Title     string `json:"title"`
-	Type      string `json:"type"`
-	Year      int    `json:"year,omitempty"`
-	Show      string `json:"show,omitempty"`
-	Season    int    `json:"season,omitempty"`
-	Episode   int    `json:"episode,omitempty"`
+	RatingKey      string `json:"rating_key"`
+	PlaylistItemID string `json:"playlist_item_id,omitempty"`
+	Title          string `json:"title"`
+	Type           string `json:"type"`
+	Year           int    `json:"year,omitempty"`
+	Show           string `json:"show,omitempty"`
+	Season         int    `json:"season,omitempty"`
+	Episode        int    `json:"episode,omitempty"`
+}
+
+type PlaylistSortCmd struct {
+	Playlist string `arg:"" help:"Playlist ID (rating key)"`
+	By       string `help:"Sort field" default:"year" enum:"year,title"`
+	Order    string `help:"Sort order" default:"asc" enum:"asc,desc"`
+	DryRun   bool   `help:"Preview the sorted order without modifying Plex" name:"dry-run" default:"false"`
+	Output   string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+}
+
+type PlaylistSortResult struct {
+	PlaylistID string `json:"playlist_id"`
+	SortBy     string `json:"sort_by"`
+	Order      string `json:"order"`
+	ItemCount  int    `json:"item_count"`
+	Moves      int    `json:"moves"`
+	Message    string `json:"message"`
 }
 
 func (c *PlaylistShowCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
@@ -310,9 +330,10 @@ func (c *PlaylistShowCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) e
 	outputItems := make([]PlaylistShowItem, 0, len(items))
 	for _, item := range items {
 		out := PlaylistShowItem{
-			RatingKey: item.RatingKey,
-			Title:     item.Title,
-			Type:      item.Type,
+			RatingKey:      item.RatingKey,
+			PlaylistItemID: item.PlaylistItemID,
+			Title:          item.Title,
+			Type:           item.Type,
 		}
 		if item.Year != nil {
 			out.Year = *item.Year
@@ -330,6 +351,63 @@ func (c *PlaylistShowCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) e
 	}
 
 	return c.output(u.Out(), outputItems)
+}
+
+func (c *PlaylistSortCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
+	cc, err := NewClientContext(cfg)
+	if err != nil {
+		return err
+	}
+	defer cc.Cancel()
+
+	items, err := cc.Client.GetPlaylistItems(cc.Ctx, c.Playlist)
+	if err != nil {
+		return fmt.Errorf("failed to get playlist items: %w", err)
+	}
+	if len(items) == 0 {
+		fmt.Fprintln(u.Err(), "Playlist is empty")
+		return nil
+	}
+
+	sortedItems := sortPlaylistItems(items, c.By, c.Order)
+	if c.DryRun {
+		return outputPlaylistSearchResults(u.Out(), c.Output, sortedItems)
+	}
+
+	moves := 0
+	afterPlaylistItemID := ""
+	for _, item := range sortedItems {
+		if item.PlaylistItemID == "" {
+			return fmt.Errorf("playlist item ID missing for %s (%s)", item.Title, item.RatingKey)
+		}
+		if err := cc.Client.MovePlaylistItem(cc.Ctx, c.Playlist, item.PlaylistItemID, afterPlaylistItemID); err != nil {
+			return fmt.Errorf("failed to move playlist item %s (%s): %w", item.Title, item.RatingKey, err)
+		}
+		afterPlaylistItemID = item.PlaylistItemID
+		moves++
+	}
+
+	result := PlaylistSortResult{
+		PlaylistID: c.Playlist,
+		SortBy:     c.By,
+		Order:      c.Order,
+		ItemCount:  len(sortedItems),
+		Moves:      moves,
+		Message:    fmt.Sprintf("Sorted %d item(s) in playlist %s by %s %s", len(sortedItems), c.Playlist, c.By, c.Order),
+	}
+
+	return c.output(u.Out(), result)
+}
+
+func (c *PlaylistSortCmd) output(w io.Writer, result PlaylistSortResult) error {
+	formatter := outfmt.NewFormatter(outfmt.Format(c.Output))
+
+	header := []string{"PLAYLIST ID", "SORT BY", "ORDER", "ITEMS", "MOVES", "MESSAGE"}
+	rows := [][]string{
+		{result.PlaylistID, result.SortBy, result.Order, fmt.Sprintf("%d", result.ItemCount), fmt.Sprintf("%d", result.Moves), result.Message},
+	}
+
+	return formatter.Format(w, header, rows, []PlaylistSortResult{result})
 }
 
 func (c *PlaylistShowCmd) output(w io.Writer, items []PlaylistShowItem) error {
@@ -363,6 +441,88 @@ func (c *PlaylistShowCmd) output(w io.Writer, items []PlaylistShowItem) error {
 	}
 
 	return formatter.Format(w, header, rows, items)
+}
+
+func outputPlaylistSearchResults(w io.Writer, format string, items []plexclient.SearchResult) error {
+	outputItems := make([]PlaylistShowItem, 0, len(items))
+	for _, item := range items {
+		out := PlaylistShowItem{
+			RatingKey:      item.RatingKey,
+			PlaylistItemID: item.PlaylistItemID,
+			Title:          item.Title,
+			Type:           item.Type,
+		}
+		if item.Year != nil {
+			out.Year = *item.Year
+		}
+		if item.GrandparentTitle != nil {
+			out.Show = *item.GrandparentTitle
+		}
+		if item.ParentIndex != nil {
+			out.Season = *item.ParentIndex
+		}
+		if item.Index != nil {
+			out.Episode = *item.Index
+		}
+		outputItems = append(outputItems, out)
+	}
+	cmd := PlaylistShowCmd{Output: format}
+	return cmd.output(w, outputItems)
+}
+
+func sortPlaylistItems(items []plexclient.SearchResult, by string, order string) []plexclient.SearchResult {
+	sortedItems := append([]plexclient.SearchResult{}, items...)
+	desc := order == "desc"
+
+	sort.SliceStable(sortedItems, func(i, j int) bool {
+		cmp := comparePlaylistItems(sortedItems[i], sortedItems[j], by)
+		if cmp == 0 {
+			return false
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+
+	return sortedItems
+}
+
+func comparePlaylistItems(left plexclient.SearchResult, right plexclient.SearchResult, by string) int {
+	switch by {
+	case "year":
+		leftYear, leftHasYear := playlistItemYear(left)
+		rightYear, rightHasYear := playlistItemYear(right)
+		switch {
+		case leftHasYear && rightHasYear && leftYear != rightYear:
+			return compareInts(leftYear, rightYear)
+		case leftHasYear != rightHasYear:
+			if leftHasYear {
+				return -1
+			}
+			return 1
+		}
+	}
+
+	return strings.Compare(strings.ToLower(left.Title), strings.ToLower(right.Title))
+}
+
+func playlistItemYear(item plexclient.SearchResult) (int, bool) {
+	if item.Year == nil || *item.Year <= 0 {
+		return 0, false
+	}
+	return *item.Year, true
+}
+
+func compareInts(left int, right int) int {
+	switch {
+	case left < right:
+		return -1
+	case left > right:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func (c *PlaylistCreateCmd) resolveItems(u *ui.UI, client *plexclient.Client, ctx context.Context) ([]string, error) {

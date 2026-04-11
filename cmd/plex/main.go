@@ -226,6 +226,7 @@ func applyOutputFormat(cli *CLI, format string) {
 	cli.Playlist.Smart.Output = format
 	cli.Playlist.Add.Output = format
 	cli.Playlist.Show.Output = format
+	cli.Playlist.Sort.Output = format
 	cli.Playlist.Delete.Output = format
 	cli.Episodes.Output = format
 	cli.Movies.Output = format
