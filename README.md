@@ -266,11 +266,38 @@ plex search "Moon" --exact --first
 plex search "Ghost in the Shell" --exact --fail-ambiguous
 ```
 
+#### List Movies
+
+```bash
+# List movies from a section with useful metadata for curation
+plex movies --section 14
+
+# OR-match repeated values within a filter, AND-match across filter types
+plex movies --section 14 --actor "Jackie Chan" --actor "Bruce Lee" --country "Hong Kong"
+
+# Emit only rating keys for shell composition
+plex movies --section 14 --actor "Jackie Chan" --keys-only
+
+# Control duplicate handling for combined libraries
+plex movies --section 14 --title "Enter the Dragon" --dedupe=guid
+plex movies --section 14 --title "Enter the Dragon" --dedupe=none
+```
+
 #### Build Playlists
 
 ```bash
 # Create a playlist from rating keys
 plex playlist create "Sci-Fi Night" 123 456
+
+# Create a playlist from keys emitted by another command
+plex movies --section 14 --actor "Jackie Chan" --keys-only | xargs plex playlist create "Jackie Chan"
+
+# Create a playlist from stdin or a file
+plex movies --section 14 --actor "Bruce Lee" --keys-only | plex playlist create "Bruce Lee" --from-stdin
+plex playlist create "Sci-Fi Night" --from-file ./keys.txt
+
+# Preview resolved playlist items without modifying Plex
+plex playlist create "Sci-Fi Night" --from-file ./keys.txt --dry-run
 
 # Create a playlist by resolving titles directly
 plex playlist create "Sci-Fi Night" --query "Solaris" --query "On the Silver Globe"

@@ -218,10 +218,12 @@ type rawMediaMetadata struct {
 	ParentIndex      *int          `json:"parentIndex"`
 	Index            *int          `json:"index"`
 	EditionTitle     *string       `json:"editionTitle"`
+	OriginalTitle    *string       `json:"originalTitle"`
 	Director         []rawNamedTag `json:"Director"`
 	Genre            []rawNamedTag `json:"Genre"`
 	Country          []rawNamedTag `json:"Country"`
 	Collection       []rawNamedTag `json:"Collection"`
+	Role             []rawNamedTag `json:"Role"`
 	Studio           *string       `json:"studio"`
 	Media            []struct {
 		Part []struct {
@@ -269,29 +271,35 @@ func (c *Client) GetAllLibraryItems(ctx context.Context, sectionID string) ([]*c
 
 	if !cacheHit {
 		err = c.executeWithRetry(ctx, "GetAllLibraryItems", func() error {
-			url := fmt.Sprintf("%s/library/sections/%s/all?X-Plex-Container-Start=0&X-Plex-Container-Size=1000&X-Plex-Token=%s", c.serverURL, sectionID, c.token)
-			req, reqErr := http.NewRequestWithContext(ctx, "GET", url, nil)
-			if reqErr != nil {
-				return fmt.Errorf("failed to create request: %w", reqErr)
+			var allItems []rawMediaMetadata
+			for start := 0; ; {
+				pageBody, doErr := c.fetchLibrarySectionPage(ctx, sectionID, start, DefaultPageSize)
+				if doErr != nil {
+					return doErr
+				}
+
+				var page rawLibraryItemsResponse
+				if doErr = json.Unmarshal(pageBody, &page); doErr != nil {
+					return fmt.Errorf("failed to unmarshal response: %w", doErr)
+				}
+				if len(page.MediaContainer.Metadata) == 0 {
+					break
+				}
+
+				allItems = append(allItems, page.MediaContainer.Metadata...)
+				if len(page.MediaContainer.Metadata) < DefaultPageSize {
+					break
+				}
+				start += len(page.MediaContainer.Metadata)
 			}
 
-			req.Header.Set("Accept", "application/json")
-
-			resp, doErr := c.httpClient.Do(req)
-			if doErr != nil {
-				return fmt.Errorf("failed to make request: %w", doErr)
+			combined := rawLibraryItemsResponse{}
+			combined.MediaContainer.Metadata = allItems
+			var marshalErr error
+			body, marshalErr = json.Marshal(combined)
+			if marshalErr != nil {
+				return fmt.Errorf("failed to marshal combined response: %w", marshalErr)
 			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode != http.StatusOK {
-				return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-			}
-
-			body, doErr = io.ReadAll(resp.Body)
-			if doErr != nil {
-				return fmt.Errorf("failed to read response body: %w", doErr)
-			}
-
 			return nil
 		})
 	}
@@ -343,9 +351,35 @@ func (c *Client) saveLibrarySectionToCache(sectionID string, body []byte) error 
 }
 
 func (c *Client) libraryCacheKey(sectionID string) string {
-	rawKey := c.serverURL + "|" + c.token + "|" + sectionID
+	rawKey := c.serverURL + "|" + c.token + "|paged|" + sectionID
 	hash := sha256.Sum256([]byte(rawKey))
 	return hex.EncodeToString(hash[:])
+}
+
+func (c *Client) fetchLibrarySectionPage(ctx context.Context, sectionID string, start, size int) ([]byte, error) {
+	url := fmt.Sprintf("%s/library/sections/%s/all?X-Plex-Container-Start=%d&X-Plex-Container-Size=%d&X-Plex-Token=%s", c.serverURL, sectionID, start, size, c.token)
+	req, reqErr := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if reqErr != nil {
+		return nil, fmt.Errorf("failed to create request: %w", reqErr)
+	}
+
+	req.Header.Set("Accept", "application/json")
+
+	resp, doErr := c.httpClient.Do(req)
+	if doErr != nil {
+		return nil, fmt.Errorf("failed to make request: %w", doErr)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	body, doErr := io.ReadAll(resp.Body)
+	if doErr != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", doErr)
+	}
+	return body, nil
 }
 
 // GetItemMetadata fetches detailed metadata for a single item including streams
@@ -443,6 +477,18 @@ func convertRawToMetadata(raw rawMediaMetadata) *components.Metadata {
 			meta.AdditionalProperties = map[string]any{}
 		}
 		meta.AdditionalProperties["editionTitle"] = *raw.EditionTitle
+	}
+	if raw.OriginalTitle != nil {
+		if meta.AdditionalProperties == nil {
+			meta.AdditionalProperties = map[string]any{}
+		}
+		meta.AdditionalProperties["originalTitle"] = *raw.OriginalTitle
+	}
+	if len(raw.Role) > 0 {
+		if meta.AdditionalProperties == nil {
+			meta.AdditionalProperties = map[string]any{}
+		}
+		meta.AdditionalProperties["actors"] = extractRawTagNames(raw.Role)
 	}
 	if raw.LibrarySectionID != nil {
 		if meta.AdditionalProperties == nil {
@@ -2422,91 +2468,73 @@ func (c *Client) GetShowEpisodes(ctx context.Context, showRatingKey string) ([]E
 	return episodes, nil
 }
 
-// MovieInfo represents a movie with director info
-type MovieInfo struct {
-	RatingKey string   `json:"ratingKey"`
-	Title     string   `json:"title"`
-	Year      int      `json:"year"`
-	Directors []string `json:"directors"`
+type MovieFilters struct {
+	Title    []string
+	Director []string
+	Actor    []string
+	Genre    []string
+	Country  []string
+	Dedupe   string
 }
 
-// GetMoviesByDirector returns all movies by a given director from a library section
-// The director name matching is case-insensitive and supports partial matches
-func (c *Client) GetMoviesByDirector(ctx context.Context, sectionID string, directorName string) ([]MovieInfo, error) {
+// MovieInfo represents a movie with metadata useful for filtering and playlist creation.
+type MovieInfo struct {
+	RatingKey     string   `json:"ratingKey"`
+	GUID          string   `json:"guid,omitempty"`
+	Title         string   `json:"title"`
+	OriginalTitle string   `json:"originalTitle,omitempty"`
+	Year          int      `json:"year"`
+	Directors     []string `json:"directors,omitempty"`
+	Actors        []string `json:"actors,omitempty"`
+	Genres        []string `json:"genres,omitempty"`
+	Countries     []string `json:"countries,omitempty"`
+	Collections   []string `json:"collections,omitempty"`
+}
+
+// GetMovies returns movies from a library section. Filters are case-insensitive
+// substring matches and are combined with AND semantics.
+func (c *Client) GetMovies(ctx context.Context, sectionID string, filters MovieFilters) ([]MovieInfo, error) {
 	if sectionID == "" {
 		return nil, &PlexError{
-			Op:  "GetMoviesByDirector",
+			Op:  "GetMovies",
 			Err: fmt.Errorf("section ID is required"),
 		}
 	}
-	if directorName == "" {
+
+	items, err := c.GetAllLibraryItems(ctx, sectionID)
+	if err != nil {
+		return nil, &PlexError{
+			Op:      "GetMovies",
+			Section: sectionID,
+			Err:     err,
+		}
+	}
+
+	movies := make([]MovieInfo, 0, len(items))
+	for _, item := range items {
+		movie := movieInfoFromMetadata(item)
+		if movie.RatingKey == "" || movie.Title == "" {
+			continue
+		}
+		if !movieMatchesFilters(movie, filters) {
+			continue
+		}
+		movies = append(movies, movie)
+	}
+
+	return dedupeMovies(movies, filters.Dedupe), nil
+}
+
+// GetMoviesByDirector returns all movies by a given director from a library section.
+// The director name matching is case-insensitive and supports partial matches.
+func (c *Client) GetMoviesByDirector(ctx context.Context, sectionID string, directorName string) ([]MovieInfo, error) {
+	if strings.TrimSpace(directorName) == "" {
 		return nil, &PlexError{
 			Op:  "GetMoviesByDirector",
 			Err: fmt.Errorf("director name is required"),
 		}
 	}
-
-	var movies []MovieInfo
-
-	err := c.executeWithRetry(ctx, "GetMoviesByDirector", func() error {
-		// Use the director filter endpoint
-		urlStr := fmt.Sprintf("%s/library/sections/%s/all?type=1&X-Plex-Container-Start=0&X-Plex-Container-Size=1000&X-Plex-Token=%s",
-			c.serverURL, sectionID, c.token)
-
-		req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
-		if err != nil {
-			return fmt.Errorf("failed to create request: %w", err)
-		}
-
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			return fmt.Errorf("failed to make request: %w", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("failed to read response body: %w", err)
-		}
-
-		var rawResp rawLibraryItemsResponse
-		if err := json.Unmarshal(body, &rawResp); err != nil {
-			return fmt.Errorf("failed to unmarshal response: %w", err)
-		}
-
-		// Filter by director name (case-insensitive, partial match)
-		directorLower := strings.ToLower(directorName)
-		for _, item := range rawResp.MediaContainer.Metadata {
-			for _, d := range item.Director {
-				if strings.Contains(strings.ToLower(d.Tag), directorLower) {
-					year := 0
-					if item.Year != nil {
-						year = *item.Year
-					}
-					directors := make([]string, len(item.Director))
-					for i, dir := range item.Director {
-						directors[i] = dir.Tag
-					}
-					movies = append(movies, MovieInfo{
-						RatingKey: item.RatingKey,
-						Title:     item.Title,
-						Year:      year,
-						Directors: directors,
-					})
-					break // Don't add the same movie twice
-				}
-			}
-		}
-
-		return nil
-	})
-
+	movies, err := c.GetMovies(ctx, sectionID, MovieFilters{Director: []string{directorName}})
 	if err != nil {
 		return nil, &PlexError{
 			Op:      "GetMoviesByDirector",
@@ -2514,8 +2542,141 @@ func (c *Client) GetMoviesByDirector(ctx context.Context, sectionID string, dire
 			Err:     err,
 		}
 	}
-
 	return movies, nil
+}
+
+func movieInfoFromMetadata(item *components.Metadata) MovieInfo {
+	if item == nil {
+		return MovieInfo{}
+	}
+
+	movie := MovieInfo{
+		RatingKey:   anyToStringMetadata(item.RatingKey),
+		GUID:        optionalStringValue(item.GUID),
+		Title:       anyToStringMetadata(item.Title),
+		Directors:   componentTagNames(item.Director),
+		Genres:      componentTagNames(item.Genre),
+		Countries:   componentTagNames(item.Country),
+		Collections: stringSliceFromAny(item.AdditionalProperties["collections"]),
+	}
+	if item.Year != nil {
+		movie.Year = *item.Year
+	}
+	if item.AdditionalProperties != nil {
+		movie.OriginalTitle = stringValue(item.AdditionalProperties["originalTitle"])
+		movie.Actors = stringSliceFromAny(item.AdditionalProperties["actors"])
+	}
+	return movie
+}
+
+func movieMatchesFilters(movie MovieInfo, filters MovieFilters) bool {
+	if !movieTitleMatchesAny(movie, filters.Title) {
+		return false
+	}
+	if !anyContainsAnyFold(movie.Directors, filters.Director) {
+		return false
+	}
+	if !anyContainsAnyFold(movie.Actors, filters.Actor) {
+		return false
+	}
+	if !anyContainsAnyFold(movie.Genres, filters.Genre) {
+		return false
+	}
+	return anyContainsAnyFold(movie.Countries, filters.Country)
+}
+
+func movieTitleMatchesAny(movie MovieInfo, needles []string) bool {
+	needles = nonEmptyStrings(needles)
+	if len(needles) == 0 {
+		return true
+	}
+	for _, needle := range needles {
+		if containsFold(movie.Title, needle) || containsFold(movie.OriginalTitle, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func anyContainsAnyFold(values []string, needles []string) bool {
+	needles = nonEmptyStrings(needles)
+	if len(needles) == 0 {
+		return true
+	}
+	for _, needle := range needles {
+		if anyContainsFold(values, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsFold(value, needle string) bool {
+	needle = strings.TrimSpace(needle)
+	if needle == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(value), strings.ToLower(needle))
+}
+
+func anyContainsFold(values []string, needle string) bool {
+	for _, value := range values {
+		if containsFold(value, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func dedupeMovies(movies []MovieInfo, mode string) []MovieInfo {
+	switch strings.TrimSpace(mode) {
+	case "", "guid":
+		return dedupeMoviesByKey(movies, movieGUIDDedupeKey)
+	case "title-year":
+		return dedupeMoviesByKey(movies, movieTitleYearDedupeKey)
+	case "none":
+		return movies
+	default:
+		return movies
+	}
+}
+
+func dedupeMoviesByKey(movies []MovieInfo, keyFn func(MovieInfo) string) []MovieInfo {
+	seen := make(map[string]struct{}, len(movies))
+	deduped := make([]MovieInfo, 0, len(movies))
+	for _, movie := range movies {
+		key := keyFn(movie)
+		if key != "" {
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+		}
+		deduped = append(deduped, movie)
+	}
+	return deduped
+}
+
+func movieGUIDDedupeKey(movie MovieInfo) string {
+	return strings.TrimSpace(movie.GUID)
+}
+
+func movieTitleYearDedupeKey(movie MovieInfo) string {
+	title := strings.TrimSpace(strings.ToLower(movie.Title))
+	if title == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", title, movie.Year)
+}
+
+func nonEmptyStrings(values []string) []string {
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			filtered = append(filtered, trimmed)
+		}
+	}
+	return filtered
 }
 
 // DirectorInfo represents a director in the library

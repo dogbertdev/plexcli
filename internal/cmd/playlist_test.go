@@ -76,6 +76,33 @@ func TestResolvePlaylistItems_AmbiguousQueryOutputsCandidates(t *testing.T) {
 	}
 }
 
+func TestParsePlaylistItemTokens_AcceptsWhitespaceAndCommas(t *testing.T) {
+	got := parsePlaylistItemTokens("  1,2\n3\t4\r\n  ")
+	want := []string{"1", "2", "3", "4"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("parsePlaylistItemTokens() = %#v, want %#v", got, want)
+	}
+}
+
+func TestPreviewPlaylistItems_ResolvesRatingKeys(t *testing.T) {
+	client, cleanup := newPlaylistTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/library/metadata/42" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"42","key":"/library/metadata/42","title":"Drunken Master","type":"movie","year":1978}]}}`))
+	})
+	defer cleanup()
+
+	items, err := previewPlaylistItems(client, context.Background(), []string{"42"})
+	if err != nil {
+		t.Fatalf("previewPlaylistItems() error = %v", err)
+	}
+	if len(items) != 1 || items[0].RatingKey != "42" || items[0].Title != "Drunken Master" || items[0].Year != 1978 {
+		t.Fatalf("unexpected preview items: %#v", items)
+	}
+}
+
 func TestPlaylistCreateResolveItems_ConstrainsQueriesByPlaylistType(t *testing.T) {
 	client, cleanup := newPlaylistTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/hubs/search" {

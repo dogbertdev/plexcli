@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/alecthomas/kong"
@@ -96,11 +97,14 @@ func (c *PlaylistListCmd) output(w io.Writer, items []PlaylistListItem) error {
 
 // PlaylistCreateCmd creates a new playlist
 type PlaylistCreateCmd struct {
-	Name    string   `arg:"" help:"Playlist name"`
-	Items   []string `arg:"" optional:"" help:"Rating keys to add"`
-	Queries []string `help:"Resolve and append items by title" name:"query"`
-	Type    string   `help:"Playlist type: video, audio, photo" default:"video" enum:"video,audio,photo"`
-	Output  string   `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+	Name      string   `arg:"" help:"Playlist name"`
+	Items     []string `arg:"" optional:"" help:"Rating keys to add"`
+	Queries   []string `help:"Resolve and append items by title" name:"query"`
+	FromFile  []string `help:"Read rating keys from a file (whitespace- or comma-separated)" name:"from-file" type:"path"`
+	FromStdin bool     `help:"Read rating keys from stdin" name:"from-stdin" default:"false"`
+	DryRun    bool     `help:"Preview resolved items without creating the playlist" name:"dry-run" default:"false"`
+	Type      string   `help:"Playlist type: video, audio, photo" default:"video" enum:"video,audio,photo"`
+	Output    string   `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
 type PlaylistCreateResult struct {
@@ -119,6 +123,14 @@ func (c *PlaylistCreateCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config)
 	items, err := c.resolveItems(u, cc.Client, cc.Ctx)
 	if err != nil {
 		return err
+	}
+
+	if c.DryRun {
+		previewItems, err := previewPlaylistItems(cc.Client, cc.Ctx, items)
+		if err != nil {
+			return err
+		}
+		return outputSearchItems(u.Out(), c.Output, previewItems)
 	}
 
 	playlist, err := cc.Client.CreatePlaylist(cc.Ctx, c.Name, c.Type, items)
@@ -354,10 +366,36 @@ func (c *PlaylistShowCmd) output(w io.Writer, items []PlaylistShowItem) error {
 }
 
 func (c *PlaylistCreateCmd) resolveItems(u *ui.UI, client *plexclient.Client, ctx context.Context) ([]string, error) {
-	return resolvePlaylistItems(u, client, ctx, c.Output, c.Items, c.Queries, SearchResolveOptions{
+	items, err := c.inputItems()
+	if err != nil {
+		return nil, err
+	}
+	return resolvePlaylistItems(u, client, ctx, c.Output, items, c.Queries, SearchResolveOptions{
 		Limit:        plexclient.DefaultSearchLimit,
 		AllowedTypes: playlistAllowedSearchTypes(c.Type),
 	})
+}
+
+func (c *PlaylistCreateCmd) inputItems() ([]string, error) {
+	items := append([]string{}, c.Items...)
+
+	for _, path := range c.FromFile {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read --from-file %s: %w", path, err)
+		}
+		items = append(items, parsePlaylistItemTokens(string(data))...)
+	}
+
+	if c.FromStdin {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read --from-stdin: %w", err)
+		}
+		items = append(items, parsePlaylistItemTokens(string(data))...)
+	}
+
+	return items, nil
 }
 
 func (c *PlaylistAddCmd) resolveItems(u *ui.UI, client *plexclient.Client, ctx context.Context) ([]string, error) {
@@ -390,10 +428,28 @@ func resolvePlaylistItems(u *ui.UI, client *plexclient.Client, ctx context.Conte
 	}
 
 	if len(resolved) == 0 {
-		return nil, fmt.Errorf("at least one item rating key or --query is required")
+		return nil, fmt.Errorf("at least one item rating key, --query, --from-file, or --from-stdin is required")
 	}
 
 	return resolved, nil
+}
+
+func parsePlaylistItemTokens(input string) []string {
+	return nonEmptyArgs(strings.FieldsFunc(input, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+	}))
+}
+
+func previewPlaylistItems(client *plexclient.Client, ctx context.Context, ratingKeys []string) ([]SearchItem, error) {
+	items := make([]SearchItem, 0, len(ratingKeys))
+	for _, ratingKey := range ratingKeys {
+		result, err := client.GetMetadataSearchResult(ctx, ratingKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to inspect playlist item %s: %w", ratingKey, err)
+		}
+		items = append(items, searchItemsFromResults([]plexclient.SearchResult{result})...)
+	}
+	return items, nil
 }
 
 func resolvePlaylistType(ctx context.Context, client *plexclient.Client, playlistID string) (string, error) {

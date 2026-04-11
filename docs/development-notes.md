@@ -136,8 +136,11 @@ plex playlist add <playlist-id> <ratingKey1> <ratingKey2>
 Notes:
 
 - `playlist create` and `playlist add` still accept rating keys positionally.
+- `playlist create --from-file` and `playlist create --from-stdin` accept whitespace- or comma-separated rating keys.
+- `playlist create --dry-run` previews resolved rating keys without creating the playlist.
 - `playlist create --query ...` and `playlist add --query ...` resolve titles through the shared search resolver.
 - `episodes --keys-only` emits keys space-separated for shell composition.
+- `movies --keys-only` also emits keys space-separated. Movie filters OR-match repeated values within a filter type, AND-match across different filter types, and default to GUID dedupe for combined libraries.
 
 ## Local Validation Commands
 
