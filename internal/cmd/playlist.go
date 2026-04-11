@@ -126,9 +126,9 @@ func (c *PlaylistCreateCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config)
 	}
 
 	if c.DryRun {
-		previewItems, err := previewPlaylistItems(cc.Client, cc.Ctx, items)
-		if err != nil {
-			return err
+		previewItems, previewErr := previewPlaylistItems(cc.Client, cc.Ctx, items)
+		if previewErr != nil {
+			return previewErr
 		}
 		return outputSearchItems(u.Out(), c.Output, previewItems)
 	}
