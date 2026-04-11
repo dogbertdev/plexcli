@@ -168,6 +168,37 @@ func TestGetMoviesPagesFullSectionAndFiltersActorMetadata(t *testing.T) {
 	}
 }
 
+func TestGetMoviesExcludesNonMovieMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/library/sections/14/all" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"MediaContainer":{"Metadata":[
+			{"ratingKey":"show-1","title":"Kung Fu","type":"show"},
+			{"ratingKey":"episode-1","title":"Alethea","type":"episode"},
+			{"ratingKey":"movie-1","title":"Drunken Master","type":"movie","year":1978}
+		]}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	movies, err := client.GetMovies(context.Background(), "14", MovieFilters{})
+	if err != nil {
+		t.Fatalf("GetMovies() error = %v", err)
+	}
+	if len(movies) != 1 {
+		t.Fatalf("expected only one movie result, got %#v", movies)
+	}
+	if movies[0].RatingKey != "movie-1" {
+		t.Fatalf("expected non-movie metadata to be excluded, got %#v", movies)
+	}
+}
+
 func TestMovieFiltersMatchRepeatedValuesAndDedupeModes(t *testing.T) {
 	movies := []MovieInfo{
 		{RatingKey: "1", GUID: "plex://movie/a", Title: "Enter the Dragon", Year: 1973, Actors: []string{"Bruce Lee"}, Countries: []string{"Hong Kong"}},
