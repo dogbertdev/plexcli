@@ -140,6 +140,8 @@ plex library refresh stop-all --yes
 
 # Update item metadata and preferences
 plex library item edit 12345 --set title="New Title" --lock title
+plex library item edit 12345,67890 --add-tag collection="Martial Arts"
+plex library item edit 12345 --remove-tag collection="Watch Later"
 plex library item prefs set 12345 --pref introDetection=1
 plex library section prefs defaults --type movie --agent tv.plex.agents.movie
 

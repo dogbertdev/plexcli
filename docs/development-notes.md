@@ -111,6 +111,11 @@ Smart playlist filters are now composed as a single library query:
 - year bounds are encoded via `year>=` / `year<=`
 - unwatched uses `unwatched=1`
 
+Metadata item edits can add or remove tags by exact rating key:
+
+- `library item edit <ids> --add-tag collection="Martial Arts"` updates `/library/metadata/<ids>` directly.
+- `library item bulk-update --filter ...` still sends Plex's raw section filter expression; prefer exact ID edits for curated collections unless the filter expression has been validated against Plex's bulk update endpoint.
+
 ## Playlist from URL Workflow (Current Best Path)
 
 Use this flow when an LLM or script has parsed a watchlist into show + episode IDs:

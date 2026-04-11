@@ -148,9 +148,11 @@ func TestEditMetadataDynamicBuildsExpectedQuery(t *testing.T) {
 	}
 
 	err = client.EditMetadataDynamic(context.Background(), "1,2", MetadataEditInput{
-		Set:    map[string]string{"title": "Updated"},
-		Lock:   []string{"title"},
-		Unlock: []string{"summary"},
+		Set:        map[string]string{"title": "Updated"},
+		Lock:       []string{"title"},
+		Unlock:     []string{"summary"},
+		AddTags:    map[string][]string{"collection": {"Martial Arts"}},
+		RemoveTags: map[string][]string{"genre": {"Drama"}},
 	})
 	if err != nil {
 		t.Fatalf("EditMetadataDynamic() error = %v", err)
@@ -167,6 +169,12 @@ func TestEditMetadataDynamicBuildsExpectedQuery(t *testing.T) {
 	}
 	if got := seenQuery.Get("summary.locked"); got != "0" {
 		t.Fatalf("expected summary.locked=0, got %q", got)
+	}
+	if got := seenQuery.Get("collection[0].tag.tag"); got != "Martial Arts" {
+		t.Fatalf("expected collection add tag query, got %q", got)
+	}
+	if got := seenQuery["genre[].tag.tag-"]; !reflect.DeepEqual(got, []string{"Drama"}) {
+		t.Fatalf("expected genre remove tag query, got %#v", got)
 	}
 }
 

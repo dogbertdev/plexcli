@@ -44,9 +44,11 @@ type SectionMutationInput struct {
 }
 
 type MetadataEditInput struct {
-	Set    map[string]string
-	Lock   []string
-	Unlock []string
+	Set        map[string]string
+	Lock       []string
+	Unlock     []string
+	AddTags    map[string][]string
+	RemoveTags map[string][]string
 }
 
 type BulkUpdateInput struct {
@@ -282,6 +284,7 @@ func (c *Client) EditMetadataDynamic(ctx context.Context, ids string, input Meta
 			query.Set(fmt.Sprintf("%s.locked", key), "0")
 		}
 	}
+	addTagUpdateQueries(query, input.AddTags, input.RemoveTags)
 	return c.LibraryAction(ctx, "EditMetadataItem", http.MethodPut, fmt.Sprintf("library/metadata/%s", encodedIDs), query)
 }
 
@@ -316,17 +319,21 @@ func (c *Client) UpdateItemsDynamic(ctx context.Context, input BulkUpdateInput) 
 			query.Set(fmt.Sprintf("%s.locked", key), "1")
 		}
 	}
-	for tagType, values := range input.AddTags {
+	addTagUpdateQueries(query, input.AddTags, input.RemoveTags)
+	return c.LibraryAction(ctx, "UpdateItems", http.MethodPut, fmt.Sprintf("library/sections/%s/all", url.PathEscape(input.SectionID)), query)
+}
+
+func addTagUpdateQueries(query url.Values, addTags, removeTags map[string][]string) {
+	for tagType, values := range addTags {
 		for i, value := range values {
 			query.Set(fmt.Sprintf("%s[%d].tag.tag", tagType, i), value)
 		}
 	}
-	for tagType, values := range input.RemoveTags {
+	for tagType, values := range removeTags {
 		for _, value := range values {
 			query.Add(fmt.Sprintf("%s[].tag.tag-", tagType), value)
 		}
 	}
-	return c.LibraryAction(ctx, "UpdateItems", http.MethodPut, fmt.Sprintf("library/sections/%s/all", url.PathEscape(input.SectionID)), query)
 }
 
 func (c *Client) AddSubtitlesByURL(ctx context.Context, ids, subtitleURL, language, title string, mediaItemID int64, format string, forced, hearingImpaired bool) error {
