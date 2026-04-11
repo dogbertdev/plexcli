@@ -2572,6 +2572,9 @@ func (c *Client) GetMovies(ctx context.Context, sectionID string, filters MovieF
 
 	movies := make([]MovieInfo, 0, len(items))
 	for _, item := range items {
+		if !metadataIsMovie(item) {
+			continue
+		}
 		movie := movieInfoFromMetadata(item)
 		if movie.RatingKey == "" || movie.Title == "" {
 			continue
@@ -2583,6 +2586,13 @@ func (c *Client) GetMovies(ctx context.Context, sectionID string, filters MovieF
 	}
 
 	return dedupeMovies(movies, filters.Dedupe), nil
+}
+
+func metadataIsMovie(item *components.Metadata) bool {
+	if item == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(anyToStringMetadata(item.Type)), "movie")
 }
 
 // GetMoviesByDirector returns all movies by a given director from a library section.

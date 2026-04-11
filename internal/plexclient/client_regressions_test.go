@@ -126,7 +126,8 @@ func TestGetMoviesPagesFullSectionAndFiltersActorMetadata(t *testing.T) {
 		case "0":
 			var b strings.Builder
 			b.WriteString(`{"MediaContainer":{"Metadata":[`)
-			for i := 0; i < DefaultPageSize; i++ {
+			b.WriteString(`{"ratingKey":"show-1","title":"Kung Fu","type":"show"},{"ratingKey":"episode-1","title":"Alethea","type":"episode"}`)
+			for i := 2; i < DefaultPageSize; i++ {
 				if i > 0 {
 					b.WriteByte(',')
 				}
@@ -153,6 +154,11 @@ func TestGetMoviesPagesFullSectionAndFiltersActorMetadata(t *testing.T) {
 	}
 	if len(movies) != 1 {
 		t.Fatalf("expected one actor-filtered movie from the second page, got %#v", movies)
+	}
+	for _, movie := range movies {
+		if strings.HasPrefix(movie.RatingKey, "show-") || strings.HasPrefix(movie.RatingKey, "episode-") {
+			t.Fatalf("expected non-movie metadata to be excluded, got %#v", movie)
+		}
 	}
 	if movies[0].RatingKey != "100" || movies[0].OriginalTitle != "醉拳" {
 		t.Fatalf("expected second-page movie metadata to survive conversion, got %#v", movies[0])
