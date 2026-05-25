@@ -2,6 +2,7 @@ package plexclient
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -72,6 +73,159 @@ func TestSearchLibrary_DedupesSharedGUIDAcrossHubs(t *testing.T) {
 	}
 	if results[0].Thumb == nil || *results[0].Thumb != "/library/metadata/99/thumb/1" {
 		t.Fatalf("expected merged thumb metadata, got %#v", results[0])
+	}
+}
+
+func TestMovePlaylistItemBuildsMoveRequest(t *testing.T) {
+	var seenPath string
+	var seenQuery url.Values
+	var seenMethod string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenMethod = r.Method
+		seenPath = r.URL.Path
+		seenQuery = r.URL.Query()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	err = client.MovePlaylistItem(context.Background(), "55", "99", "88")
+	if err != nil {
+		t.Fatalf("MovePlaylistItem() error = %v", err)
+	}
+
+	if seenMethod != http.MethodPut {
+		t.Fatalf("expected PUT request, got %s", seenMethod)
+	}
+	if seenPath != "/playlists/55/items/99/move" {
+		t.Fatalf("unexpected path: %s", seenPath)
+	}
+	if got := seenQuery.Get("after"); got != "88" {
+		t.Fatalf("expected after query, got %q", got)
+	}
+	if got := seenQuery.Get("X-Plex-Token"); got != "test-token" {
+		t.Fatalf("expected token query, got %q", got)
+	}
+}
+
+func TestGetMoviesPagesFullSectionAndFiltersActorMetadata(t *testing.T) {
+	var starts []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/library/sections/14/all" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		start := r.URL.Query().Get("X-Plex-Container-Start")
+		starts = append(starts, start)
+		w.Header().Set("Content-Type", "application/json")
+
+		switch start {
+		case "0":
+			var b strings.Builder
+			b.WriteString(`{"MediaContainer":{"Metadata":[`)
+			b.WriteString(`{"ratingKey":"show-1","title":"Kung Fu","type":"show"},{"ratingKey":"episode-1","title":"Alethea","type":"episode"}`)
+			for i := 2; i < DefaultPageSize; i++ {
+				if i > 0 {
+					b.WriteByte(',')
+				}
+				fmt.Fprintf(&b, `{"ratingKey":"%d","title":"Movie %d","type":"movie"}`, i, i)
+			}
+			b.WriteString(`]}}`)
+			_, _ = w.Write([]byte(b.String()))
+		case "100":
+			_, _ = w.Write([]byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"100","title":"Drunken Master","originalTitle":"醉拳","type":"movie","year":1978,"Director":[{"tag":"Yuen Woo-Ping"}],"Role":[{"tag":"Jackie Chan"}],"Genre":[{"tag":"Action"}],"Country":[{"tag":"Hong Kong"}]}]}}`))
+		default:
+			t.Fatalf("unexpected page start: %s", start)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	movies, err := client.GetMovies(context.Background(), "14", MovieFilters{Actor: []string{"Jackie"}})
+	if err != nil {
+		t.Fatalf("GetMovies() error = %v", err)
+	}
+	if len(movies) != 1 {
+		t.Fatalf("expected one actor-filtered movie from the second page, got %#v", movies)
+	}
+	for _, movie := range movies {
+		if strings.HasPrefix(movie.RatingKey, "show-") || strings.HasPrefix(movie.RatingKey, "episode-") {
+			t.Fatalf("expected non-movie metadata to be excluded, got %#v", movie)
+		}
+	}
+	if movies[0].RatingKey != "100" || movies[0].OriginalTitle != "醉拳" {
+		t.Fatalf("expected second-page movie metadata to survive conversion, got %#v", movies[0])
+	}
+	if strings.Join(starts, ",") != "0,100" {
+		t.Fatalf("expected paged section fetches, got %q", strings.Join(starts, ","))
+	}
+}
+
+func TestGetMoviesExcludesNonMovieMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/library/sections/14/all" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"MediaContainer":{"Metadata":[
+			{"ratingKey":"show-1","title":"Kung Fu","type":"show"},
+			{"ratingKey":"episode-1","title":"Alethea","type":"episode"},
+			{"ratingKey":"movie-1","title":"Drunken Master","type":"movie","year":1978}
+		]}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "test-token", WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	movies, err := client.GetMovies(context.Background(), "14", MovieFilters{})
+	if err != nil {
+		t.Fatalf("GetMovies() error = %v", err)
+	}
+	if len(movies) != 1 {
+		t.Fatalf("expected only one movie result, got %#v", movies)
+	}
+	if movies[0].RatingKey != "movie-1" {
+		t.Fatalf("expected non-movie metadata to be excluded, got %#v", movies)
+	}
+}
+
+func TestMovieFiltersMatchRepeatedValuesAndDedupeModes(t *testing.T) {
+	movies := []MovieInfo{
+		{RatingKey: "1", GUID: "plex://movie/a", Title: "Enter the Dragon", Year: 1973, Actors: []string{"Bruce Lee"}, Countries: []string{"Hong Kong"}},
+		{RatingKey: "2", GUID: "plex://movie/a", Title: "Enter the Dragon", Year: 1973, Actors: []string{"Bruce Lee"}, Countries: []string{"Hong Kong"}},
+		{RatingKey: "3", GUID: "plex://movie/b", Title: "Drunken Master", Year: 1978, Actors: []string{"Jackie Chan"}, Countries: []string{"Hong Kong"}},
+	}
+
+	filtered := make([]MovieInfo, 0, len(movies))
+	for _, movie := range movies {
+		if movieMatchesFilters(movie, MovieFilters{
+			Actor:   []string{"Jackie Chan", "Bruce Lee"},
+			Country: []string{"Hong Kong"},
+		}) {
+			filtered = append(filtered, movie)
+		}
+	}
+	if len(filtered) != 3 {
+		t.Fatalf("expected repeated actor values to OR-match all movies, got %#v", filtered)
+	}
+
+	deduped := dedupeMovies(filtered, "guid")
+	if len(deduped) != 2 {
+		t.Fatalf("expected guid dedupe to collapse duplicate copies, got %#v", deduped)
+	}
+	notDeduped := dedupeMovies(filtered, "none")
+	if len(notDeduped) != 3 {
+		t.Fatalf("expected none dedupe to preserve copies, got %#v", notDeduped)
 	}
 }
 

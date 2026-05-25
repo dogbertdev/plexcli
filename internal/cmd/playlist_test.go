@@ -76,6 +76,33 @@ func TestResolvePlaylistItems_AmbiguousQueryOutputsCandidates(t *testing.T) {
 	}
 }
 
+func TestParsePlaylistItemTokens_AcceptsWhitespaceAndCommas(t *testing.T) {
+	got := parsePlaylistItemTokens("  1,2\n3\t4\r\n  ")
+	want := []string{"1", "2", "3", "4"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("parsePlaylistItemTokens() = %#v, want %#v", got, want)
+	}
+}
+
+func TestPreviewPlaylistItems_ResolvesRatingKeys(t *testing.T) {
+	client, cleanup := newPlaylistTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/library/metadata/42" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"42","key":"/library/metadata/42","title":"Drunken Master","type":"movie","year":1978}]}}`))
+	})
+	defer cleanup()
+
+	items, err := previewPlaylistItems(client, context.Background(), []string{"42"})
+	if err != nil {
+		t.Fatalf("previewPlaylistItems() error = %v", err)
+	}
+	if len(items) != 1 || items[0].RatingKey != "42" || items[0].Title != "Drunken Master" || items[0].Year != 1978 {
+		t.Fatalf("unexpected preview items: %#v", items)
+	}
+}
+
 func TestPlaylistCreateResolveItems_ConstrainsQueriesByPlaylistType(t *testing.T) {
 	client, cleanup := newPlaylistTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/hubs/search" {
@@ -240,6 +267,87 @@ func TestPlaylistSmartNoFilters_IgnoresBlankValues(t *testing.T) {
 
 	if !cmd.noFilters() {
 		t.Fatalf("expected blank filter values to be treated as empty: %#v", cmd)
+	}
+}
+
+func TestSortPlaylistItems_ByYearAscending(t *testing.T) {
+	year1978 := 1978
+	year1972 := 1972
+	year2000 := 2000
+	items := []plexclient.SearchResult{
+		{RatingKey: "1", Title: "Drunken Master", Year: &year1978},
+		{RatingKey: "2", Title: "Fist of Fury", Year: &year1972},
+		{RatingKey: "3", Title: "Unknown"},
+		{RatingKey: "4", Title: "Crouching Tiger", Year: &year2000},
+	}
+
+	sorted := sortPlaylistItems(items, "year", "asc")
+
+	got := []string{sorted[0].RatingKey, sorted[1].RatingKey, sorted[2].RatingKey, sorted[3].RatingKey}
+	want := []string{"2", "1", "4", "3"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("unexpected sort order: got %#v want %#v", got, want)
+	}
+}
+
+func TestPlanPlaylistMoves_SkipsAlreadySortedItems(t *testing.T) {
+	items := []plexclient.SearchResult{
+		{RatingKey: "1", PlaylistItemID: "11", Title: "A"},
+		{RatingKey: "2", PlaylistItemID: "22", Title: "B"},
+	}
+
+	moves, err := planPlaylistMoves(items, append([]plexclient.SearchResult{}, items...))
+	if err != nil {
+		t.Fatalf("planPlaylistMoves() error = %v", err)
+	}
+	if len(moves) != 0 {
+		t.Fatalf("expected no moves for an already sorted playlist, got %#v", moves)
+	}
+}
+
+func TestPlanPlaylistMoves_BuildsMinimalMoveSequence(t *testing.T) {
+	current := []plexclient.SearchResult{
+		{RatingKey: "3", PlaylistItemID: "33", Title: "C"},
+		{RatingKey: "1", PlaylistItemID: "11", Title: "A"},
+		{RatingKey: "2", PlaylistItemID: "22", Title: "B"},
+	}
+	desired := []plexclient.SearchResult{
+		{RatingKey: "1", PlaylistItemID: "11", Title: "A"},
+		{RatingKey: "2", PlaylistItemID: "22", Title: "B"},
+		{RatingKey: "3", PlaylistItemID: "33", Title: "C"},
+	}
+
+	moves, err := planPlaylistMoves(current, desired)
+	if err != nil {
+		t.Fatalf("planPlaylistMoves() error = %v", err)
+	}
+	if len(moves) != 2 {
+		t.Fatalf("expected 2 moves, got %#v", moves)
+	}
+	if moves[0].Item.PlaylistItemID != "11" || moves[0].AfterPlaylistItemID != "" {
+		t.Fatalf("unexpected first move: %#v", moves[0])
+	}
+	if moves[1].Item.PlaylistItemID != "22" || moves[1].AfterPlaylistItemID != "11" {
+		t.Fatalf("unexpected second move: %#v", moves[1])
+	}
+}
+
+func TestGetPlaylistItems_PreservesPlaylistItemID(t *testing.T) {
+	client, cleanup := newPlaylistTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/playlists/55/items" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"42","playlistItemID":99,"key":"/library/metadata/42","title":"Drunken Master","type":"movie","year":1978}]}}`))
+	})
+	defer cleanup()
+
+	items, err := client.GetPlaylistItems(context.Background(), "55")
+	if err != nil {
+		t.Fatalf("GetPlaylistItems() error = %v", err)
+	}
+	if len(items) != 1 || items[0].PlaylistItemID != "99" {
+		t.Fatalf("expected playlist item ID to be preserved, got %#v", items)
 	}
 }
 

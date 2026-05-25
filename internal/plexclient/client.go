@@ -218,10 +218,12 @@ type rawMediaMetadata struct {
 	ParentIndex      *int          `json:"parentIndex"`
 	Index            *int          `json:"index"`
 	EditionTitle     *string       `json:"editionTitle"`
+	OriginalTitle    *string       `json:"originalTitle"`
 	Director         []rawNamedTag `json:"Director"`
 	Genre            []rawNamedTag `json:"Genre"`
 	Country          []rawNamedTag `json:"Country"`
 	Collection       []rawNamedTag `json:"Collection"`
+	Role             []rawNamedTag `json:"Role"`
 	Studio           *string       `json:"studio"`
 	Media            []struct {
 		Part []struct {
@@ -269,29 +271,35 @@ func (c *Client) GetAllLibraryItems(ctx context.Context, sectionID string) ([]*c
 
 	if !cacheHit {
 		err = c.executeWithRetry(ctx, "GetAllLibraryItems", func() error {
-			url := fmt.Sprintf("%s/library/sections/%s/all?X-Plex-Container-Start=0&X-Plex-Container-Size=1000&X-Plex-Token=%s", c.serverURL, sectionID, c.token)
-			req, reqErr := http.NewRequestWithContext(ctx, "GET", url, nil)
-			if reqErr != nil {
-				return fmt.Errorf("failed to create request: %w", reqErr)
+			var allItems []rawMediaMetadata
+			for start := 0; ; {
+				pageBody, doErr := c.fetchLibrarySectionPage(ctx, sectionID, start, DefaultPageSize)
+				if doErr != nil {
+					return doErr
+				}
+
+				var page rawLibraryItemsResponse
+				if doErr = json.Unmarshal(pageBody, &page); doErr != nil {
+					return fmt.Errorf("failed to unmarshal response: %w", doErr)
+				}
+				if len(page.MediaContainer.Metadata) == 0 {
+					break
+				}
+
+				allItems = append(allItems, page.MediaContainer.Metadata...)
+				if len(page.MediaContainer.Metadata) < DefaultPageSize {
+					break
+				}
+				start += len(page.MediaContainer.Metadata)
 			}
 
-			req.Header.Set("Accept", "application/json")
-
-			resp, doErr := c.httpClient.Do(req)
-			if doErr != nil {
-				return fmt.Errorf("failed to make request: %w", doErr)
+			combined := rawLibraryItemsResponse{}
+			combined.MediaContainer.Metadata = allItems
+			var marshalErr error
+			body, marshalErr = json.Marshal(combined)
+			if marshalErr != nil {
+				return fmt.Errorf("failed to marshal combined response: %w", marshalErr)
 			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode != http.StatusOK {
-				return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-			}
-
-			body, doErr = io.ReadAll(resp.Body)
-			if doErr != nil {
-				return fmt.Errorf("failed to read response body: %w", doErr)
-			}
-
 			return nil
 		})
 	}
@@ -343,9 +351,35 @@ func (c *Client) saveLibrarySectionToCache(sectionID string, body []byte) error 
 }
 
 func (c *Client) libraryCacheKey(sectionID string) string {
-	rawKey := c.serverURL + "|" + c.token + "|" + sectionID
+	rawKey := c.serverURL + "|" + c.token + "|paged|" + sectionID
 	hash := sha256.Sum256([]byte(rawKey))
 	return hex.EncodeToString(hash[:])
+}
+
+func (c *Client) fetchLibrarySectionPage(ctx context.Context, sectionID string, start, size int) ([]byte, error) {
+	url := fmt.Sprintf("%s/library/sections/%s/all?X-Plex-Container-Start=%d&X-Plex-Container-Size=%d&X-Plex-Token=%s", c.serverURL, sectionID, start, size, c.token)
+	req, reqErr := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if reqErr != nil {
+		return nil, fmt.Errorf("failed to create request: %w", reqErr)
+	}
+
+	req.Header.Set("Accept", "application/json")
+
+	resp, doErr := c.httpClient.Do(req)
+	if doErr != nil {
+		return nil, fmt.Errorf("failed to make request: %w", doErr)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	body, doErr := io.ReadAll(resp.Body)
+	if doErr != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", doErr)
+	}
+	return body, nil
 }
 
 // GetItemMetadata fetches detailed metadata for a single item including streams
@@ -443,6 +477,18 @@ func convertRawToMetadata(raw rawMediaMetadata) *components.Metadata {
 			meta.AdditionalProperties = map[string]any{}
 		}
 		meta.AdditionalProperties["editionTitle"] = *raw.EditionTitle
+	}
+	if raw.OriginalTitle != nil {
+		if meta.AdditionalProperties == nil {
+			meta.AdditionalProperties = map[string]any{}
+		}
+		meta.AdditionalProperties["originalTitle"] = *raw.OriginalTitle
+	}
+	if len(raw.Role) > 0 {
+		if meta.AdditionalProperties == nil {
+			meta.AdditionalProperties = map[string]any{}
+		}
+		meta.AdditionalProperties["actors"] = extractRawTagNames(raw.Role)
 	}
 	if raw.LibrarySectionID != nil {
 		if meta.AdditionalProperties == nil {
@@ -1146,6 +1192,7 @@ func (c *Client) GetMaxRetries() int {
 // SearchResult represents a single search result item
 type SearchResult struct {
 	RatingKey           string   `json:"ratingKey"`
+	PlaylistItemID      string   `json:"playlistItemID,omitempty"`
 	Key                 string   `json:"key"`
 	Title               string   `json:"title"`
 	Type                string   `json:"type"`
@@ -2230,6 +2277,63 @@ func (c *Client) DeletePlaylist(ctx context.Context, playlistID string) error {
 	return nil
 }
 
+// MovePlaylistItem moves an item inside a regular playlist. When afterPlaylistItemID
+// is empty, Plex moves the item to the beginning of the playlist.
+func (c *Client) MovePlaylistItem(ctx context.Context, playlistID string, playlistItemID string, afterPlaylistItemID string) error {
+	if playlistID == "" {
+		return &PlexError{
+			Op:  "MovePlaylistItem",
+			Err: fmt.Errorf("playlist ID is required"),
+		}
+	}
+	if playlistItemID == "" {
+		return &PlexError{
+			Op:  "MovePlaylistItem",
+			Err: fmt.Errorf("playlist item ID is required"),
+		}
+	}
+
+	err := c.executeWithRetry(ctx, "MovePlaylistItem", func() error {
+		query := url.Values{}
+		query.Set("X-Plex-Token", c.token)
+		if afterPlaylistItemID != "" {
+			query.Set("after", afterPlaylistItemID)
+		}
+
+		urlStr := fmt.Sprintf("%s/playlists/%s/items/%s/move?%s",
+			c.serverURL, url.PathEscape(playlistID), url.PathEscape(playlistItemID), query.Encode())
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, urlStr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to make request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return &PlexError{
+			Op:  "MovePlaylistItem",
+			Err: err,
+		}
+	}
+
+	return nil
+}
+
 // GetPlaylistItems returns the items in a playlist
 func (c *Client) GetPlaylistItems(ctx context.Context, playlistID string) ([]SearchResult, error) {
 	if playlistID == "" {
@@ -2272,6 +2376,7 @@ func (c *Client) GetPlaylistItems(ctx context.Context, playlistID string) ([]Sea
 			MediaContainer struct {
 				Metadata []struct {
 					RatingKey        string  `json:"ratingKey"`
+					PlaylistItemID   any     `json:"playlistItemID"`
 					Key              string  `json:"key"`
 					Title            string  `json:"title"`
 					Type             string  `json:"type"`
@@ -2290,6 +2395,7 @@ func (c *Client) GetPlaylistItems(ctx context.Context, playlistID string) ([]Sea
 		for _, item := range altResp.MediaContainer.Metadata {
 			items = append(items, SearchResult{
 				RatingKey:        item.RatingKey,
+				PlaylistItemID:   anyToStringMetadata(item.PlaylistItemID),
 				Key:              item.Key,
 				Title:            item.Title,
 				Type:             item.Type,
@@ -2420,102 +2526,6 @@ func (c *Client) GetShowEpisodes(ctx context.Context, showRatingKey string) ([]E
 	}
 
 	return episodes, nil
-}
-
-// MovieInfo represents a movie with director info
-type MovieInfo struct {
-	RatingKey string   `json:"ratingKey"`
-	Title     string   `json:"title"`
-	Year      int      `json:"year"`
-	Directors []string `json:"directors"`
-}
-
-// GetMoviesByDirector returns all movies by a given director from a library section
-// The director name matching is case-insensitive and supports partial matches
-func (c *Client) GetMoviesByDirector(ctx context.Context, sectionID string, directorName string) ([]MovieInfo, error) {
-	if sectionID == "" {
-		return nil, &PlexError{
-			Op:  "GetMoviesByDirector",
-			Err: fmt.Errorf("section ID is required"),
-		}
-	}
-	if directorName == "" {
-		return nil, &PlexError{
-			Op:  "GetMoviesByDirector",
-			Err: fmt.Errorf("director name is required"),
-		}
-	}
-
-	var movies []MovieInfo
-
-	err := c.executeWithRetry(ctx, "GetMoviesByDirector", func() error {
-		// Use the director filter endpoint
-		urlStr := fmt.Sprintf("%s/library/sections/%s/all?type=1&X-Plex-Container-Start=0&X-Plex-Container-Size=1000&X-Plex-Token=%s",
-			c.serverURL, sectionID, c.token)
-
-		req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
-		if err != nil {
-			return fmt.Errorf("failed to create request: %w", err)
-		}
-
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			return fmt.Errorf("failed to make request: %w", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("failed to read response body: %w", err)
-		}
-
-		var rawResp rawLibraryItemsResponse
-		if err := json.Unmarshal(body, &rawResp); err != nil {
-			return fmt.Errorf("failed to unmarshal response: %w", err)
-		}
-
-		// Filter by director name (case-insensitive, partial match)
-		directorLower := strings.ToLower(directorName)
-		for _, item := range rawResp.MediaContainer.Metadata {
-			for _, d := range item.Director {
-				if strings.Contains(strings.ToLower(d.Tag), directorLower) {
-					year := 0
-					if item.Year != nil {
-						year = *item.Year
-					}
-					directors := make([]string, len(item.Director))
-					for i, dir := range item.Director {
-						directors[i] = dir.Tag
-					}
-					movies = append(movies, MovieInfo{
-						RatingKey: item.RatingKey,
-						Title:     item.Title,
-						Year:      year,
-						Directors: directors,
-					})
-					break // Don't add the same movie twice
-				}
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, &PlexError{
-			Op:      "GetMoviesByDirector",
-			Section: sectionID,
-			Err:     err,
-		}
-	}
-
-	return movies, nil
 }
 
 // DirectorInfo represents a director in the library

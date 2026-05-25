@@ -50,7 +50,7 @@ type CLI struct {
 	ServerInfo   cmd.ServerInfoCmd       `cmd:"" name:"server-info" help:"Show Plex server and library summary information"`
 	Playlist     cmd.PlaylistCmd         `cmd:"" help:"Manage playlists"`
 	Episodes     cmd.EpisodesListCmd     `cmd:"" help:"List episodes for a show with optional filtering"`
-	Movies       cmd.MoviesCmd           `cmd:"" help:"List movies with optional filtering (e.g., by director)"`
+	Movies       cmd.MoviesCmd           `cmd:"" help:"List movies with optional filtering"`
 	Directors    cmd.DirectorsCmd        `cmd:"" help:"List all directors in a library"`
 	Match        cmd.MatchCmd            `cmd:"" help:"Fix metadata matches for items"`
 	Editions     cmd.EditionsCmd         `cmd:"" help:"List movies with editions and check for issues"`
@@ -226,6 +226,7 @@ func applyOutputFormat(cli *CLI, format string) {
 	cli.Playlist.Smart.Output = format
 	cli.Playlist.Add.Output = format
 	cli.Playlist.Show.Output = format
+	cli.Playlist.Sort.Output = format
 	cli.Playlist.Delete.Output = format
 	cli.Episodes.Output = format
 	cli.Movies.Output = format

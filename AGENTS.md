@@ -1,5 +1,10 @@
 # Project Notes
 
+## Plex API References
+
+- When researching Plex endpoint behavior or response shapes, use only the Go API reference generated for the Plex client dependency or official Plex documentation as authoritative sources.
+- Do not cite or rely on third-party, scraped, generated, or unofficial Plex API pages for implementation decisions. If official documentation is missing or unclear, verify behavior through local code, sanitized real-response fixtures, or live CLI checks, and describe it as empirical verification rather than documentation-backed behavior.
+
 ## Real-Response Test Fixtures
 
 - `internal/auth/testdata/plex_tv_user.json` and `internal/auth/testdata/plex_tv_resources.json` are sanitized fixtures derived from real Plex.tv responses captured on March 6, 2026.

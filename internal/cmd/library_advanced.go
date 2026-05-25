@@ -36,11 +36,13 @@ type LibraryItemDeleteCmd struct {
 }
 
 type LibraryItemEditCmd struct {
-	IDs    string   `arg:"" name:"ids" help:"Comma-separated metadata IDs"`
-	Set    []string `help:"Field assignment in key=value form" name:"set" required:""`
-	Lock   []string `help:"Metadata field to lock" name:"lock"`
-	Unlock []string `help:"Metadata field to unlock" name:"unlock"`
-	Output string   `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+	IDs       string   `arg:"" name:"ids" help:"Comma-separated metadata IDs"`
+	Set       []string `help:"Field assignment in key=value form" name:"set"`
+	Lock      []string `help:"Metadata field to lock" name:"lock"`
+	Unlock    []string `help:"Metadata field to unlock" name:"unlock"`
+	AddTags   []string `help:"Tag assignment in type=value form" name:"add-tag"`
+	RemoveTag []string `help:"Tag removal in type=value form" name:"remove-tag"`
+	Output    string   `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
 type LibraryItemRefreshCmd struct {
@@ -402,8 +404,25 @@ func (c *LibraryItemEditCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config
 	if err != nil {
 		return err
 	}
+	addTags, err := parseMultiValueFlags(c.AddTags)
+	if err != nil {
+		return err
+	}
+	removeTags, err := parseMultiValueFlags(c.RemoveTag)
+	if err != nil {
+		return err
+	}
+	if len(setValues) == 0 && len(c.Lock) == 0 && len(c.Unlock) == 0 && len(addTags) == 0 && len(removeTags) == 0 {
+		return fmt.Errorf("at least one edit, lock, unlock, add-tag, or remove-tag value is required")
+	}
 	return runSimpleClientAction(cfg, u, c.Output, "item-edit", c.IDs, "items updated", func(runCtx context.Context, client *plexclient.Client) error {
-		return client.EditMetadataDynamic(runCtx, c.IDs, plexclient.MetadataEditInput{Set: setValues, Lock: c.Lock, Unlock: c.Unlock})
+		return client.EditMetadataDynamic(runCtx, c.IDs, plexclient.MetadataEditInput{
+			Set:        setValues,
+			Lock:       c.Lock,
+			Unlock:     c.Unlock,
+			AddTags:    addTags,
+			RemoveTags: removeTags,
+		})
 	})
 }
 

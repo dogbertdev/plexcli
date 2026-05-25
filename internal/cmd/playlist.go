@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"sort"
 	"strings"
 
 	"github.com/alecthomas/kong"
@@ -21,6 +23,7 @@ type PlaylistCmd struct {
 	Smart  PlaylistSmartCmd  `cmd:"" help:"Create a smart playlist (auto-updates)"`
 	Add    PlaylistAddCmd    `cmd:"" help:"Add items to a playlist"`
 	Show   PlaylistShowCmd   `cmd:"" help:"Show items in a playlist"`
+	Sort   PlaylistSortCmd   `cmd:"" help:"Sort a regular playlist"`
 	Delete PlaylistDeleteCmd `cmd:"" help:"Delete a playlist"`
 }
 
@@ -96,11 +99,14 @@ func (c *PlaylistListCmd) output(w io.Writer, items []PlaylistListItem) error {
 
 // PlaylistCreateCmd creates a new playlist
 type PlaylistCreateCmd struct {
-	Name    string   `arg:"" help:"Playlist name"`
-	Items   []string `arg:"" optional:"" help:"Rating keys to add"`
-	Queries []string `help:"Resolve and append items by title" name:"query"`
-	Type    string   `help:"Playlist type: video, audio, photo" default:"video" enum:"video,audio,photo"`
-	Output  string   `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+	Name      string   `arg:"" help:"Playlist name"`
+	Items     []string `arg:"" optional:"" help:"Rating keys to add"`
+	Queries   []string `help:"Resolve and append items by title" name:"query"`
+	FromFile  []string `help:"Read rating keys from a file (whitespace- or comma-separated)" name:"from-file" type:"path"`
+	FromStdin bool     `help:"Read rating keys from stdin" name:"from-stdin" default:"false"`
+	DryRun    bool     `help:"Preview resolved items without creating the playlist" name:"dry-run" default:"false"`
+	Type      string   `help:"Playlist type: video, audio, photo" default:"video" enum:"video,audio,photo"`
+	Output    string   `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
 }
 
 type PlaylistCreateResult struct {
@@ -119,6 +125,14 @@ func (c *PlaylistCreateCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config)
 	items, err := c.resolveItems(u, cc.Client, cc.Ctx)
 	if err != nil {
 		return err
+	}
+
+	if c.DryRun {
+		previewItems, previewErr := previewPlaylistItems(cc.Client, cc.Ctx, items)
+		if previewErr != nil {
+			return previewErr
+		}
+		return outputSearchItems(u.Out(), c.Output, previewItems)
 	}
 
 	playlist, err := cc.Client.CreatePlaylist(cc.Ctx, c.Name, c.Type, items)
@@ -269,13 +283,31 @@ type PlaylistShowCmd struct {
 }
 
 type PlaylistShowItem struct {
-	RatingKey string `json:"rating_key"`
-	Title     string `json:"title"`
-	Type      string `json:"type"`
-	Year      int    `json:"year,omitempty"`
-	Show      string `json:"show,omitempty"`
-	Season    int    `json:"season,omitempty"`
-	Episode   int    `json:"episode,omitempty"`
+	RatingKey      string `json:"rating_key"`
+	PlaylistItemID string `json:"playlist_item_id,omitempty"`
+	Title          string `json:"title"`
+	Type           string `json:"type"`
+	Year           int    `json:"year,omitempty"`
+	Show           string `json:"show,omitempty"`
+	Season         int    `json:"season,omitempty"`
+	Episode        int    `json:"episode,omitempty"`
+}
+
+type PlaylistSortCmd struct {
+	Playlist string `arg:"" help:"Playlist ID (rating key)"`
+	By       string `help:"Sort field" default:"year" enum:"year,title"`
+	Order    string `help:"Sort order" default:"asc" enum:"asc,desc"`
+	DryRun   bool   `help:"Preview the sorted order without modifying Plex" name:"dry-run" default:"false"`
+	Output   string `help:"Output format: table, json, or tsv" default:"table" enum:"table,json,tsv"`
+}
+
+type PlaylistSortResult struct {
+	PlaylistID string `json:"playlist_id"`
+	SortBy     string `json:"sort_by"`
+	Order      string `json:"order"`
+	ItemCount  int    `json:"item_count"`
+	Moves      int    `json:"moves"`
+	Message    string `json:"message"`
 }
 
 func (c *PlaylistShowCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
@@ -295,29 +327,65 @@ func (c *PlaylistShowCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) e
 		return nil
 	}
 
-	outputItems := make([]PlaylistShowItem, 0, len(items))
-	for _, item := range items {
-		out := PlaylistShowItem{
-			RatingKey: item.RatingKey,
-			Title:     item.Title,
-			Type:      item.Type,
-		}
-		if item.Year != nil {
-			out.Year = *item.Year
-		}
-		if item.GrandparentTitle != nil {
-			out.Show = *item.GrandparentTitle
-		}
-		if item.ParentIndex != nil {
-			out.Season = *item.ParentIndex
-		}
-		if item.Index != nil {
-			out.Episode = *item.Index
-		}
-		outputItems = append(outputItems, out)
+	return c.output(u.Out(), playlistShowItemsFromResults(items))
+}
+
+func (c *PlaylistSortCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
+	cc, err := NewClientContext(cfg)
+	if err != nil {
+		return err
+	}
+	defer cc.Cancel()
+
+	items, err := cc.Client.GetPlaylistItems(cc.Ctx, c.Playlist)
+	if err != nil {
+		return fmt.Errorf("failed to get playlist items: %w", err)
+	}
+	if len(items) == 0 {
+		fmt.Fprintln(u.Err(), "Playlist is empty")
+		return nil
 	}
 
-	return c.output(u.Out(), outputItems)
+	sortedItems := sortPlaylistItems(items, c.By, c.Order)
+	if c.DryRun {
+		return outputPlaylistSearchResults(u.Out(), c.Output, sortedItems)
+	}
+
+	movePlan, err := planPlaylistMoves(items, sortedItems)
+	if err != nil {
+		return err
+	}
+	for _, move := range movePlan {
+		if err := cc.Client.MovePlaylistItem(cc.Ctx, c.Playlist, move.Item.PlaylistItemID, move.AfterPlaylistItemID); err != nil {
+			return fmt.Errorf("failed to move playlist item %s (%s): %w", move.Item.Title, move.Item.RatingKey, err)
+		}
+	}
+
+	message := fmt.Sprintf("Sorted %d item(s) in playlist %s by %s %s", len(sortedItems), c.Playlist, c.By, c.Order)
+	if len(movePlan) == 0 {
+		message = fmt.Sprintf("Playlist %s already sorted by %s %s", c.Playlist, c.By, c.Order)
+	}
+	result := PlaylistSortResult{
+		PlaylistID: c.Playlist,
+		SortBy:     c.By,
+		Order:      c.Order,
+		ItemCount:  len(sortedItems),
+		Moves:      len(movePlan),
+		Message:    message,
+	}
+
+	return c.output(u.Out(), result)
+}
+
+func (c *PlaylistSortCmd) output(w io.Writer, result PlaylistSortResult) error {
+	formatter := outfmt.NewFormatter(outfmt.Format(c.Output))
+
+	header := []string{"PLAYLIST ID", "SORT BY", "ORDER", "ITEMS", "MOVES", "MESSAGE"}
+	rows := [][]string{
+		{result.PlaylistID, result.SortBy, result.Order, fmt.Sprintf("%d", result.ItemCount), fmt.Sprintf("%d", result.Moves), result.Message},
+	}
+
+	return formatter.Format(w, header, rows, []PlaylistSortResult{result})
 }
 
 func (c *PlaylistShowCmd) output(w io.Writer, items []PlaylistShowItem) error {
@@ -353,11 +421,189 @@ func (c *PlaylistShowCmd) output(w io.Writer, items []PlaylistShowItem) error {
 	return formatter.Format(w, header, rows, items)
 }
 
+func outputPlaylistSearchResults(w io.Writer, format string, items []plexclient.SearchResult) error {
+	cmd := PlaylistShowCmd{Output: format}
+	return cmd.output(w, playlistShowItemsFromResults(items))
+}
+
+func sortPlaylistItems(items []plexclient.SearchResult, by string, order string) []plexclient.SearchResult {
+	sortedItems := append([]plexclient.SearchResult{}, items...)
+	desc := order == "desc"
+
+	sort.SliceStable(sortedItems, func(i, j int) bool {
+		cmp := comparePlaylistItems(sortedItems[i], sortedItems[j], by)
+		if cmp == 0 {
+			return false
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+
+	return sortedItems
+}
+
+type playlistMove struct {
+	Item                plexclient.SearchResult
+	AfterPlaylistItemID string
+}
+
+func playlistShowItemsFromResults(items []plexclient.SearchResult) []PlaylistShowItem {
+	outputItems := make([]PlaylistShowItem, 0, len(items))
+	for _, item := range items {
+		out := PlaylistShowItem{
+			RatingKey:      item.RatingKey,
+			PlaylistItemID: item.PlaylistItemID,
+			Title:          item.Title,
+			Type:           item.Type,
+		}
+		if item.Year != nil {
+			out.Year = *item.Year
+		}
+		if item.GrandparentTitle != nil {
+			out.Show = *item.GrandparentTitle
+		}
+		if item.ParentIndex != nil {
+			out.Season = *item.ParentIndex
+		}
+		if item.Index != nil {
+			out.Episode = *item.Index
+		}
+		outputItems = append(outputItems, out)
+	}
+	return outputItems
+}
+
+func planPlaylistMoves(currentItems []plexclient.SearchResult, desiredItems []plexclient.SearchResult) ([]playlistMove, error) {
+	workingIDs := make([]string, len(currentItems))
+	for i, item := range currentItems {
+		if item.PlaylistItemID == "" {
+			return nil, fmt.Errorf("playlist item ID missing for %s (%s)", item.Title, item.RatingKey)
+		}
+		workingIDs[i] = item.PlaylistItemID
+	}
+
+	moves := make([]playlistMove, 0, len(desiredItems))
+	for i, item := range desiredItems {
+		if item.PlaylistItemID == "" {
+			return nil, fmt.Errorf("playlist item ID missing for %s (%s)", item.Title, item.RatingKey)
+		}
+		if i < len(workingIDs) && workingIDs[i] == item.PlaylistItemID {
+			continue
+		}
+
+		currentIndex := indexPlaylistItemID(workingIDs, item.PlaylistItemID)
+		if currentIndex == -1 {
+			return nil, fmt.Errorf("playlist item ID missing from current order for %s (%s)", item.Title, item.RatingKey)
+		}
+
+		afterPlaylistItemID := ""
+		if i > 0 {
+			afterPlaylistItemID = desiredItems[i-1].PlaylistItemID
+		}
+		moves = append(moves, playlistMove{
+			Item:                item,
+			AfterPlaylistItemID: afterPlaylistItemID,
+		})
+		workingIDs = movePlaylistItemID(workingIDs, currentIndex, i)
+	}
+
+	return moves, nil
+}
+
+func indexPlaylistItemID(ids []string, target string) int {
+	for i, id := range ids {
+		if id == target {
+			return i
+		}
+	}
+	return -1
+}
+
+func movePlaylistItemID(ids []string, from, to int) []string {
+	if from == to {
+		return ids
+	}
+
+	moved := ids[from]
+	copy(ids[from:], ids[from+1:])
+	ids = ids[:len(ids)-1]
+
+	ids = append(ids, "")
+	copy(ids[to+1:], ids[to:])
+	ids[to] = moved
+	return ids
+}
+
+func comparePlaylistItems(left plexclient.SearchResult, right plexclient.SearchResult, by string) int {
+	switch by {
+	case "year":
+		leftYear, leftHasYear := playlistItemYear(left)
+		rightYear, rightHasYear := playlistItemYear(right)
+		switch {
+		case leftHasYear && rightHasYear && leftYear != rightYear:
+			return compareInts(leftYear, rightYear)
+		case leftHasYear != rightHasYear:
+			if leftHasYear {
+				return -1
+			}
+			return 1
+		}
+	}
+
+	return strings.Compare(strings.ToLower(left.Title), strings.ToLower(right.Title))
+}
+
+func playlistItemYear(item plexclient.SearchResult) (int, bool) {
+	if item.Year == nil || *item.Year <= 0 {
+		return 0, false
+	}
+	return *item.Year, true
+}
+
+func compareInts(left int, right int) int {
+	switch {
+	case left < right:
+		return -1
+	case left > right:
+		return 1
+	default:
+		return 0
+	}
+}
+
 func (c *PlaylistCreateCmd) resolveItems(u *ui.UI, client *plexclient.Client, ctx context.Context) ([]string, error) {
-	return resolvePlaylistItems(u, client, ctx, c.Output, c.Items, c.Queries, SearchResolveOptions{
+	items, err := c.inputItems()
+	if err != nil {
+		return nil, err
+	}
+	return resolvePlaylistItems(u, client, ctx, c.Output, items, c.Queries, SearchResolveOptions{
 		Limit:        plexclient.DefaultSearchLimit,
 		AllowedTypes: playlistAllowedSearchTypes(c.Type),
 	})
+}
+
+func (c *PlaylistCreateCmd) inputItems() ([]string, error) {
+	items := append([]string{}, c.Items...)
+
+	for _, path := range c.FromFile {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read --from-file %s: %w", path, err)
+		}
+		items = append(items, parsePlaylistItemTokens(string(data))...)
+	}
+
+	if c.FromStdin {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read --from-stdin: %w", err)
+		}
+		items = append(items, parsePlaylistItemTokens(string(data))...)
+	}
+
+	return items, nil
 }
 
 func (c *PlaylistAddCmd) resolveItems(u *ui.UI, client *plexclient.Client, ctx context.Context) ([]string, error) {
@@ -390,10 +636,28 @@ func resolvePlaylistItems(u *ui.UI, client *plexclient.Client, ctx context.Conte
 	}
 
 	if len(resolved) == 0 {
-		return nil, fmt.Errorf("at least one item rating key or --query is required")
+		return nil, fmt.Errorf("at least one item rating key, --query, --from-file, or --from-stdin is required")
 	}
 
 	return resolved, nil
+}
+
+func parsePlaylistItemTokens(input string) []string {
+	return nonEmptyArgs(strings.FieldsFunc(input, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+	}))
+}
+
+func previewPlaylistItems(client *plexclient.Client, ctx context.Context, ratingKeys []string) ([]SearchItem, error) {
+	items := make([]SearchItem, 0, len(ratingKeys))
+	for _, ratingKey := range ratingKeys {
+		result, err := client.GetMetadataSearchResult(ctx, ratingKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to inspect playlist item %s: %w", ratingKey, err)
+		}
+		items = append(items, searchItemsFromResults([]plexclient.SearchResult{result})...)
+	}
+	return items, nil
 }
 
 func resolvePlaylistType(ctx context.Context, client *plexclient.Client, playlistID string) (string, error) {
