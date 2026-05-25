@@ -327,30 +327,7 @@ func (c *PlaylistShowCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) e
 		return nil
 	}
 
-	outputItems := make([]PlaylistShowItem, 0, len(items))
-	for _, item := range items {
-		out := PlaylistShowItem{
-			RatingKey:      item.RatingKey,
-			PlaylistItemID: item.PlaylistItemID,
-			Title:          item.Title,
-			Type:           item.Type,
-		}
-		if item.Year != nil {
-			out.Year = *item.Year
-		}
-		if item.GrandparentTitle != nil {
-			out.Show = *item.GrandparentTitle
-		}
-		if item.ParentIndex != nil {
-			out.Season = *item.ParentIndex
-		}
-		if item.Index != nil {
-			out.Episode = *item.Index
-		}
-		outputItems = append(outputItems, out)
-	}
-
-	return c.output(u.Out(), outputItems)
+	return c.output(u.Out(), playlistShowItemsFromResults(items))
 }
 
 func (c *PlaylistSortCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) error {
@@ -374,26 +351,27 @@ func (c *PlaylistSortCmd) Run(ctx *kong.Context, u *ui.UI, cfg *config.Config) e
 		return outputPlaylistSearchResults(u.Out(), c.Output, sortedItems)
 	}
 
-	moves := 0
-	afterPlaylistItemID := ""
-	for _, item := range sortedItems {
-		if item.PlaylistItemID == "" {
-			return fmt.Errorf("playlist item ID missing for %s (%s)", item.Title, item.RatingKey)
+	movePlan, err := planPlaylistMoves(items, sortedItems)
+	if err != nil {
+		return err
+	}
+	for _, move := range movePlan {
+		if err := cc.Client.MovePlaylistItem(cc.Ctx, c.Playlist, move.Item.PlaylistItemID, move.AfterPlaylistItemID); err != nil {
+			return fmt.Errorf("failed to move playlist item %s (%s): %w", move.Item.Title, move.Item.RatingKey, err)
 		}
-		if err := cc.Client.MovePlaylistItem(cc.Ctx, c.Playlist, item.PlaylistItemID, afterPlaylistItemID); err != nil {
-			return fmt.Errorf("failed to move playlist item %s (%s): %w", item.Title, item.RatingKey, err)
-		}
-		afterPlaylistItemID = item.PlaylistItemID
-		moves++
 	}
 
+	message := fmt.Sprintf("Sorted %d item(s) in playlist %s by %s %s", len(sortedItems), c.Playlist, c.By, c.Order)
+	if len(movePlan) == 0 {
+		message = fmt.Sprintf("Playlist %s already sorted by %s %s", c.Playlist, c.By, c.Order)
+	}
 	result := PlaylistSortResult{
 		PlaylistID: c.Playlist,
 		SortBy:     c.By,
 		Order:      c.Order,
 		ItemCount:  len(sortedItems),
-		Moves:      moves,
-		Message:    fmt.Sprintf("Sorted %d item(s) in playlist %s by %s %s", len(sortedItems), c.Playlist, c.By, c.Order),
+		Moves:      len(movePlan),
+		Message:    message,
 	}
 
 	return c.output(u.Out(), result)
@@ -444,6 +422,34 @@ func (c *PlaylistShowCmd) output(w io.Writer, items []PlaylistShowItem) error {
 }
 
 func outputPlaylistSearchResults(w io.Writer, format string, items []plexclient.SearchResult) error {
+	cmd := PlaylistShowCmd{Output: format}
+	return cmd.output(w, playlistShowItemsFromResults(items))
+}
+
+func sortPlaylistItems(items []plexclient.SearchResult, by string, order string) []plexclient.SearchResult {
+	sortedItems := append([]plexclient.SearchResult{}, items...)
+	desc := order == "desc"
+
+	sort.SliceStable(sortedItems, func(i, j int) bool {
+		cmp := comparePlaylistItems(sortedItems[i], sortedItems[j], by)
+		if cmp == 0 {
+			return false
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+
+	return sortedItems
+}
+
+type playlistMove struct {
+	Item                plexclient.SearchResult
+	AfterPlaylistItemID string
+}
+
+func playlistShowItemsFromResults(items []plexclient.SearchResult) []PlaylistShowItem {
 	outputItems := make([]PlaylistShowItem, 0, len(items))
 	for _, item := range items {
 		out := PlaylistShowItem{
@@ -466,26 +472,68 @@ func outputPlaylistSearchResults(w io.Writer, format string, items []plexclient.
 		}
 		outputItems = append(outputItems, out)
 	}
-	cmd := PlaylistShowCmd{Output: format}
-	return cmd.output(w, outputItems)
+	return outputItems
 }
 
-func sortPlaylistItems(items []plexclient.SearchResult, by string, order string) []plexclient.SearchResult {
-	sortedItems := append([]plexclient.SearchResult{}, items...)
-	desc := order == "desc"
-
-	sort.SliceStable(sortedItems, func(i, j int) bool {
-		cmp := comparePlaylistItems(sortedItems[i], sortedItems[j], by)
-		if cmp == 0 {
-			return false
+func planPlaylistMoves(currentItems []plexclient.SearchResult, desiredItems []plexclient.SearchResult) ([]playlistMove, error) {
+	workingIDs := make([]string, len(currentItems))
+	for i, item := range currentItems {
+		if item.PlaylistItemID == "" {
+			return nil, fmt.Errorf("playlist item ID missing for %s (%s)", item.Title, item.RatingKey)
 		}
-		if desc {
-			return cmp > 0
-		}
-		return cmp < 0
-	})
+		workingIDs[i] = item.PlaylistItemID
+	}
 
-	return sortedItems
+	moves := make([]playlistMove, 0, len(desiredItems))
+	for i, item := range desiredItems {
+		if item.PlaylistItemID == "" {
+			return nil, fmt.Errorf("playlist item ID missing for %s (%s)", item.Title, item.RatingKey)
+		}
+		if i < len(workingIDs) && workingIDs[i] == item.PlaylistItemID {
+			continue
+		}
+
+		currentIndex := indexPlaylistItemID(workingIDs, item.PlaylistItemID)
+		if currentIndex == -1 {
+			return nil, fmt.Errorf("playlist item ID missing from current order for %s (%s)", item.Title, item.RatingKey)
+		}
+
+		afterPlaylistItemID := ""
+		if i > 0 {
+			afterPlaylistItemID = desiredItems[i-1].PlaylistItemID
+		}
+		moves = append(moves, playlistMove{
+			Item:                item,
+			AfterPlaylistItemID: afterPlaylistItemID,
+		})
+		workingIDs = movePlaylistItemID(workingIDs, currentIndex, i)
+	}
+
+	return moves, nil
+}
+
+func indexPlaylistItemID(ids []string, target string) int {
+	for i, id := range ids {
+		if id == target {
+			return i
+		}
+	}
+	return -1
+}
+
+func movePlaylistItemID(ids []string, from, to int) []string {
+	if from == to {
+		return ids
+	}
+
+	moved := ids[from]
+	copy(ids[from:], ids[from+1:])
+	ids = ids[:len(ids)-1]
+
+	ids = append(ids, "")
+	copy(ids[to+1:], ids[to:])
+	ids[to] = moved
+	return ids
 }
 
 func comparePlaylistItems(left plexclient.SearchResult, right plexclient.SearchResult, by string) int {

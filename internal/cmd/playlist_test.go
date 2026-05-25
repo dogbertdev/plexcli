@@ -290,6 +290,48 @@ func TestSortPlaylistItems_ByYearAscending(t *testing.T) {
 	}
 }
 
+func TestPlanPlaylistMoves_SkipsAlreadySortedItems(t *testing.T) {
+	items := []plexclient.SearchResult{
+		{RatingKey: "1", PlaylistItemID: "11", Title: "A"},
+		{RatingKey: "2", PlaylistItemID: "22", Title: "B"},
+	}
+
+	moves, err := planPlaylistMoves(items, append([]plexclient.SearchResult{}, items...))
+	if err != nil {
+		t.Fatalf("planPlaylistMoves() error = %v", err)
+	}
+	if len(moves) != 0 {
+		t.Fatalf("expected no moves for an already sorted playlist, got %#v", moves)
+	}
+}
+
+func TestPlanPlaylistMoves_BuildsMinimalMoveSequence(t *testing.T) {
+	current := []plexclient.SearchResult{
+		{RatingKey: "3", PlaylistItemID: "33", Title: "C"},
+		{RatingKey: "1", PlaylistItemID: "11", Title: "A"},
+		{RatingKey: "2", PlaylistItemID: "22", Title: "B"},
+	}
+	desired := []plexclient.SearchResult{
+		{RatingKey: "1", PlaylistItemID: "11", Title: "A"},
+		{RatingKey: "2", PlaylistItemID: "22", Title: "B"},
+		{RatingKey: "3", PlaylistItemID: "33", Title: "C"},
+	}
+
+	moves, err := planPlaylistMoves(current, desired)
+	if err != nil {
+		t.Fatalf("planPlaylistMoves() error = %v", err)
+	}
+	if len(moves) != 2 {
+		t.Fatalf("expected 2 moves, got %#v", moves)
+	}
+	if moves[0].Item.PlaylistItemID != "11" || moves[0].AfterPlaylistItemID != "" {
+		t.Fatalf("unexpected first move: %#v", moves[0])
+	}
+	if moves[1].Item.PlaylistItemID != "22" || moves[1].AfterPlaylistItemID != "11" {
+		t.Fatalf("unexpected second move: %#v", moves[1])
+	}
+}
+
 func TestGetPlaylistItems_PreservesPlaylistItemID(t *testing.T) {
 	client, cleanup := newPlaylistTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/playlists/55/items" {
